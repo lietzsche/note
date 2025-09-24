@@ -15,7 +15,7 @@
   "type": "commonjs",
   "main": "choco-run-workflow.js",
   "scripts": {
-    "gitaction:metacher": "node mteacher-run-workflow.js",
+    "gitaction:mteacher": "node mteacher-run-workflow.js",
     "gitaction:choco": "node choco-run-workflow.js"
   },
   "dependencies": {
