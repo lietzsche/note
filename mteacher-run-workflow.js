@@ -1,4 +1,6 @@
 // run-workflow-fixed.js
+require('dotenv').config();
+
 const OWNER = "rightstack";
 const REPO = "testroom-scenario-mteacher";
 const WORKFLOW_FILE = "playwright.yml"; // 또는 숫자 ID로 교체 가능
@@ -26,13 +28,13 @@ async function getDefaultBranch() {
   return repo.default_branch || "main";
 }
 
-async function triggerWorkflow() {
+async function triggerWorkflow(feature = "mteacher", tags = "") {
   const ref = await getDefaultBranch(); // 필요하면 "main" 고정
   const url = `/repos/${OWNER}/${REPO}/actions/workflows/${WORKFLOW_FILE}/dispatches`;
 
   const body = {
     ref,
-    inputs: { env: "qa", feature: "mteacher", tags: "" },
+    inputs: { env: "qa", feature, tags },
   };
 
   const res = await gh(url, { method: "POST", body: JSON.stringify(body) });
@@ -45,6 +47,7 @@ async function triggerWorkflow() {
   }
 }
 
-triggerWorkflow().catch(err => {
-  console.error("❌ Error:", err.message);
-});
+["mteacher", "makex", "aiclass", "digitalmap", "topicmatrix"]
+    .forEach(feature =>
+        triggerWorkflow(feature)
+            .catch(err => console.error("❌ Error:", err.message)));
