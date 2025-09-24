@@ -1,5 +1,6 @@
 // run-workflow-fixed.js
 require('dotenv').config();
+const cron = require("node-cron");
 
 const OWNER = "rightstack";
 const REPO = "playwright-test-choco";
@@ -97,8 +98,11 @@ async function runFeaturesSequentially(features) {
   }
 }
 
-runFeaturesSequentially(["choco",
+const runAllFeatures = () => runFeaturesSequentially(["choco",
   //TODO 추후 작업 하면 choco class 열어주기
   // "choco-class",
   "choco-pop", "daldal-math", "daldal-read"])
     .catch(err => console.error("❌ Error:", err.message));
+
+// 매일 오전 3시 설정
+cron.schedule("0 3 * * *", runAllFeatures)
