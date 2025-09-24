@@ -72,7 +72,7 @@ async function waitForRunCompletion(runId) {
       return run.conclusion; // success, failure, cancelled 등
     }
 
-    await new Promise(r => setTimeout(r, 60000)); // 1분 대기
+    await new Promise(r => setTimeout(r, 300000)); // 5분 대기
   }
 }
 
