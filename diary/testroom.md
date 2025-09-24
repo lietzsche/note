@@ -75,4 +75,8 @@
 - 이현희 선임님께 초코 클래스 문의 필요
 
 ### 필요해 보이는 것
-- Cron 설정 외부에서 훅 설정 필요
+- Cron 설정 외부에서 훅 설정 필요: 여기 소스에 적용
+
+### Resend 임의 설정
+- from: Acme <onboarding@resend.dev>
+- to: stxtory@gmail.com
