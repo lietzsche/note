@@ -80,3 +80,11 @@
 ### Resend 임의 설정
 - from: Acme <onboarding@resend.dev>
 - to: stxtory@gmail.com
+
+## 250925 Note
+
+### Resend 임의 설정 rightstack으로 작업
+- 했으나, 추후 담당자들 별로 다르게 보내는 건 별도 검토 필요
+
+### Report 작업 필요
+- 파일 명 양식: report_{features}_{YYYYMMdd}
