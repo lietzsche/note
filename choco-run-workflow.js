@@ -97,8 +97,5 @@ async function runFeaturesSequentially(features) {
   }
 }
 
-runFeaturesSequentially(["choco",
-  //TODO 추후 작업 하면 choco class 열어주기
-  // "choco-class",
-  "choco-pop", "daldal-math", "daldal-read"])
+runFeaturesSequentially(["choco", "choco-class", "choco-pop", "daldal-math", "daldal-read"])
     .catch(err => console.error("❌ Error:", err.message));
