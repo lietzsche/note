@@ -1,5 +1,5 @@
-// run-workflow-fixed.js
 require('dotenv').config();
+const cron = require("node-cron");
 
 const OWNER = "rightstack";
 const REPO = "testroom-scenario-mteacher";
@@ -47,7 +47,10 @@ async function triggerWorkflow(feature = "mteacher", tags = "") {
   }
 }
 
-["mteacher", "makex", "aiclass", "digitalmap", "topicmatrix"]
+const runAllFeatures = () => ["mteacher", "makex", "aiclass", "digitalmap", "topicmatrix"]
     .forEach(feature =>
         triggerWorkflow(feature)
             .catch(err => console.error("❌ Error:", err.message)));
+
+// 매일 오전 7시 설정
+cron.schedule("0 7 * * *", runAllFeatures)
