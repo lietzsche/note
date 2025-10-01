@@ -91,10 +91,7 @@ async function runFeaturesSequentially(features) {
     const result = await waitForRunCompletion(runId);
     console.log(`✅ ${feature} finished with result: ${result}`);
 
-    if (result !== "success") {
-      console.error(`❌ Stopping chain because ${feature} failed`);
-      break;
-    }
+    console.log(`➡ Moving on to next feature regardless of result.`);
   }
 }
 
