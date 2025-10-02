@@ -7,6 +7,49 @@ const REPO = "playwright-test-choco";
 const WORKFLOW_FILE = "playwright.yml"; // 또는 숫자 ID로 교체 가능
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
+//통신 오류 로그
+// 공용 fetch wrapper
+async function safeFetch(url, init = {}, retries = 3, timeoutMs = 30000) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const res = await fetch(`https://api.github.com${url}`, {
+        ...init,
+        headers: {
+          "Accept": "application/vnd.github+json",
+          "Content-Type": "application/json",
+          "User-Agent": "run-workflow-script",
+          "Authorization": `Bearer ${GITHUB_TOKEN}`,
+          ...(init.headers || {})
+        },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status} - ${await res.text()}`);
+      }
+      return res;
+
+    } catch (err) {
+      clearTimeout(timeout);
+      console.error(`⚠️ Fetch attempt ${attempt + 1} failed: ${err.message}`);
+
+      if (attempt < retries) {
+        const delay = 1000 * Math.pow(2, attempt); // 지수 백오프
+        console.log(`⏳ Retrying in ${delay / 1000}s...`);
+        await new Promise(r => setTimeout(r, delay));
+      } else {
+        throw new Error(`❌ All ${retries + 1} fetch attempts failed: ${err.message}`);
+      }
+    }
+  }
+}
+
+
 async function gh(path, init={}) {
   if (!GITHUB_TOKEN) throw new Error("GITHUB_TOKEN is not set");
   const res = await fetch(`https://api.github.com${path}`, {
@@ -64,7 +107,7 @@ async function getLatestRunId(workflowFile, branch, feature) {
 
 async function waitForRunCompletion(runId) {
   while (true) {
-    const res = await gh(`/repos/${OWNER}/${REPO}/actions/runs/${runId}`);
+    const res = await safeFetch(`/repos/${OWNER}/${REPO}/actions/runs/${runId}`);
     if (!res.ok) throw new Error(`Failed to fetch run status: ${res.status} ${await res.text()}`);
     const run = await res.json();
     console.log(`🔄 Status: ${run.status}, Conclusion: ${run.conclusion}`);
