@@ -53,4 +53,4 @@ const runAllFeatures = () => ["mteacher", "makex", "aiclass", "digitalmap", "top
             .catch(err => console.error("❌ Error:", err.message)));
 
 // 매일 오전 7시 설정
-cron.schedule("0 7 * * *", runAllFeatures)
+cron.schedule("0 6 * * *", runAllFeatures)
