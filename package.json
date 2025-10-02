@@ -15,6 +15,7 @@
   "type": "commonjs",
   "main": "choco-run-workflow.js",
   "scripts": {
+    "gitaction": "node mteacher-run-workflow.js && node choco-run-workflow.js",
     "gitaction:mteacher": "node mteacher-run-workflow.js",
     "gitaction:choco": "node choco-run-workflow.js"
   },
