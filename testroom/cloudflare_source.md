@@ -78,7 +78,7 @@ export default {
     // ---- 설정 ----
     const WINDOW_START_KST = (env.WINDOW_START_KST || "06:30").trim(); // "HH:mm"
     const WINDOW_DURATION_MIN = parseInt(env.WINDOW_DURATION_MIN || "120", 10);
-    const FEATURES = ["choco", "choco-class", "choco-pop", "daldal-math", "daldal-read"];
+    const FEATURES = ["daldal-math", "daldal-read", "choco-pop", "choco"];
     const DISPATCH_COOLDOWN_MS = 10 * 60 * 1000; // 디스패치 후 10분 안에 재발사 금지
 
     // ---- 시간 도우미 ----
