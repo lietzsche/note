@@ -143,4 +143,5 @@ const runAllFeatures = () =>
         .catch(err => console.error("❌ Error:", err.message));
 
 // 매일 오전 7시 설정
-cron.schedule("30 6 * * *", runAllFeatures)
+// cron.schedule("30 6 * * *", runAllFeatures)
+runAllFeatures()
