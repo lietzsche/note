@@ -1,6 +1,26 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Editor, { useMonaco } from '@monaco-editor/react'
 
+type ScenarioAsset = {
+  name?: string
+  content: string
+}
+
+type ScenarioRecord = {
+  id: number
+  title: string
+  features: ScenarioAsset[]
+  steps: ScenarioAsset[]
+  createdAt: string
+  updatedAt: string
+}
+
+type ScenarioPayload = {
+  title: string
+  features: ScenarioAsset[]
+  steps: ScenarioAsset[]
+}
+
 type RunResponse = {
   runDir?: string
   stdout?: string
@@ -8,6 +28,9 @@ type RunResponse = {
   report?: unknown
 }
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+
+const DEFAULT_TITLE = 'New Scenario'
 const DEFAULT_FEATURE_NAME = 'example.feature'
 const DEFAULT_STEPS_NAME = 'example.steps.ts'
 const DEFAULT_FEATURE_CONTENT = `Feature: Example
@@ -31,20 +54,24 @@ Then('I should see the expected result', async function () {
 });
 `
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
-
 function ScenarioEditor() {
   const monaco = useMonaco()
 
+  const [scenarios, setScenarios] = useState<ScenarioRecord[]>([])
+  const [selectedScenarioId, setSelectedScenarioId] = useState<number | null>(null)
+  const [title, setTitle] = useState(DEFAULT_TITLE)
   const [featureName, setFeatureName] = useState(DEFAULT_FEATURE_NAME)
   const [stepsName, setStepsName] = useState(DEFAULT_STEPS_NAME)
   const [featureContent, setFeatureContent] = useState(DEFAULT_FEATURE_CONTENT)
   const [stepsContent, setStepsContent] = useState(DEFAULT_STEPS_CONTENT)
+
+  const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [isRunning, setIsRunning] = useState(false)
-  const [saveMessage, setSaveMessage] = useState<string | null>(null)
-  const [runResult, setRunResult] = useState<RunResponse | null>(null)
+
+  const [feedback, setFeedback] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [runResult, setRunResult] = useState<RunResponse | null>(null)
 
   useEffect(() => {
     if (!monaco) {
@@ -105,8 +132,9 @@ function ScenarioEditor() {
     }
   }, [monaco])
 
-  const payload = useMemo(
+  const scenarioPayload = useMemo<ScenarioPayload>(
     () => ({
+      title: title.trim() || DEFAULT_TITLE,
       features: [
         {
           name: featureName.trim() || DEFAULT_FEATURE_NAME,
@@ -120,17 +148,22 @@ function ScenarioEditor() {
         },
       ],
     }),
-    [featureName, featureContent, stepsName, stepsContent]
+    [title, featureName, featureContent, stepsName, stepsContent]
   )
 
-  const postScenarioData = useCallback(
-    async (path: string) => {
+  const runPayload = useMemo(
+    () => ({
+      features: scenarioPayload.features,
+      steps: scenarioPayload.steps,
+    }),
+    [scenarioPayload]
+  )
+
+  const fetchJson = useCallback(
+    async <T,>(path: string, init?: RequestInit): Promise<T> => {
       const response = await fetch(`${API_BASE_URL}${path}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json' },
+        ...init,
       })
 
       if (!response.ok) {
@@ -138,170 +171,351 @@ function ScenarioEditor() {
         throw new Error(message || `Request to ${path} failed with status ${response.status}`)
       }
 
-      if (response.headers.get('content-length') === '0' || response.status === 204) {
-        return null
+      if (response.status === 204) {
+        return undefined as T
       }
 
-      const text = await response.text()
-      return text ? (JSON.parse(text) as RunResponse) : null
+      return (await response.json()) as T
     },
-    [payload]
+    []
   )
 
-  const handleSave = useCallback(async () => {
-    setIsSaving(true)
-    setSaveMessage(null)
+  const applyScenario = useCallback((scenario: ScenarioRecord) => {
+    setSelectedScenarioId(scenario.id)
+    setTitle(scenario.title ?? DEFAULT_TITLE)
+    setFeatureName(scenario.features[0]?.name ?? DEFAULT_FEATURE_NAME)
+    setFeatureContent(scenario.features[0]?.content ?? DEFAULT_FEATURE_CONTENT)
+    setStepsName(scenario.steps[0]?.name ?? DEFAULT_STEPS_NAME)
+    setStepsContent(scenario.steps[0]?.content ?? DEFAULT_STEPS_CONTENT)
+  }, [])
+
+  const resetEditor = useCallback(() => {
+    setSelectedScenarioId(null)
+    setTitle(DEFAULT_TITLE)
+    setFeatureName(DEFAULT_FEATURE_NAME)
+    setFeatureContent(DEFAULT_FEATURE_CONTENT)
+    setStepsName(DEFAULT_STEPS_NAME)
+    setStepsContent(DEFAULT_STEPS_CONTENT)
+  }, [])
+
+  const loadScenarios = useCallback(async () => {
+    setIsLoading(true)
     setError(null)
 
     try {
-      await postScenarioData('/api/scenarios')
-      setSaveMessage('시나리오가 저장되었습니다.')
+      const data = await fetchJson<ScenarioRecord[]>('/api/scenarios')
+      setScenarios(data)
+      if (data.length > 0) {
+        applyScenario(data[0])
+      } else {
+        resetEditor()
+      }
     } catch (err) {
-      const message = err instanceof Error ? err.message : '시나리오 저장 중 오류가 발생했습니다.'
+      const message =
+        err instanceof Error ? err.message : 'Failed to load scenarios from the server.'
+      setError(message)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [applyScenario, fetchJson, resetEditor])
+
+  useEffect(() => {
+    void loadScenarios()
+  }, [loadScenarios])
+
+  const handleSelectScenario = useCallback(
+    (id: number) => {
+      const scenario = scenarios.find((item) => item.id === id)
+      if (!scenario) {
+        return
+      }
+      applyScenario(scenario)
+      setFeedback(null)
+      setError(null)
+    },
+    [applyScenario, scenarios]
+  )
+
+  const upsertScenarioInList = useCallback((updated: ScenarioRecord) => {
+    setScenarios((current) => {
+      const exists = current.some((item) => item.id === updated.id)
+      if (exists) {
+        return current.map((item) => (item.id === updated.id ? updated : item))
+      }
+      return [updated, ...current]
+    })
+  }, [])
+
+  const handleNewScenario = useCallback(() => {
+    resetEditor()
+    setFeedback(null)
+    setError(null)
+    setRunResult(null)
+  }, [resetEditor])
+
+  const handleSave = useCallback(async () => {
+    setIsSaving(true)
+    setFeedback(null)
+    setError(null)
+
+    try {
+      if (selectedScenarioId === null) {
+        const created = await fetchJson<ScenarioRecord>('/api/scenarios', {
+          method: 'POST',
+          body: JSON.stringify(scenarioPayload),
+        })
+        upsertScenarioInList(created)
+        applyScenario(created)
+        setFeedback('Scenario saved.')
+      } else {
+        const updated = await fetchJson<ScenarioRecord>(`/api/scenarios/${selectedScenarioId}`, {
+          method: 'PUT',
+          body: JSON.stringify(scenarioPayload),
+        })
+        upsertScenarioInList(updated)
+        applyScenario(updated)
+        setFeedback('Scenario updated.')
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to save the scenario. Please try again.'
       setError(message)
     } finally {
       setIsSaving(false)
     }
-  }, [postScenarioData])
+  }, [applyScenario, fetchJson, scenarioPayload, selectedScenarioId, upsertScenarioInList])
+
+  const handleDelete = useCallback(async () => {
+    if (selectedScenarioId === null) {
+      resetEditor()
+      return
+    }
+
+    if (!window.confirm('Delete this scenario?')) {
+      return
+    }
+
+    setError(null)
+    setFeedback(null)
+
+    try {
+      await fetchJson<void>(`/api/scenarios/${selectedScenarioId}`, {
+        method: 'DELETE',
+      })
+      setScenarios((current) => current.filter((item) => item.id !== selectedScenarioId))
+      resetEditor()
+      setRunResult(null)
+      setFeedback('Scenario deleted.')
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to delete the scenario. Please try again.'
+      setError(message)
+    }
+  }, [fetchJson, resetEditor, selectedScenarioId])
 
   const handleRun = useCallback(async () => {
     setIsRunning(true)
-    setRunResult(null)
     setError(null)
+    setFeedback(null)
+    setRunResult(null)
 
     try {
-      const data = await postScenarioData('/api/run')
-      setRunResult(data ?? { stdout: '실행이 완료되었습니다.' })
+      const data = await fetchJson<RunResponse>('/api/run', {
+        method: 'POST',
+        body: JSON.stringify(runPayload),
+      })
+      setRunResult(data ?? { stdout: 'Run completed.' })
+      setFeedback('Scenario executed.')
     } catch (err) {
-      const message = err instanceof Error ? err.message : '시나리오 실행 중 오류가 발생했습니다.'
+      const message =
+        err instanceof Error ? err.message : 'Failed to execute the scenario. Please try again.'
       setError(message)
     } finally {
       setIsRunning(false)
     }
-  }, [postScenarioData])
+  }, [fetchJson, runPayload])
 
   return (
-    <div className="flex flex-col gap-6 p-6">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold text-slate-900">Scenario Editor</h1>
-        <p className="text-sm text-slate-600">
-          Feature와 Step 코드를 작성하고 Spring 백엔드로 저장하거나 실행하세요.
-        </p>
-      </header>
-
-      <section className="grid gap-6 lg:grid-cols-2">
-        <div className="flex flex-col gap-3">
-          <label className="flex flex-col gap-2">
-            <span className="text-sm font-medium text-slate-700">Feature 파일명</span>
-            <input
-              className="rounded border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-              value={featureName}
-              onChange={(event) => setFeatureName(event.target.value)}
-              placeholder="example.feature"
-            />
-          </label>
-          <div className="overflow-hidden rounded border border-slate-200 shadow-sm">
-            <Editor
-              height="400px"
-              defaultLanguage="gherkin"
-              language="gherkin"
-              value={featureContent}
-              onChange={(value) => setFeatureContent(value ?? '')}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 14,
-                wordWrap: 'on',
-                lineNumbers: 'on',
-                scrollBeyondLastLine: false,
-              }}
-            />
-          </div>
+    <div className="flex min-h-screen flex-col gap-6 bg-slate-100 p-6 lg:flex-row">
+      <aside className="flex w-full flex-col gap-4 rounded border border-slate-200 bg-white p-4 shadow-sm lg:w-72">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-800">Scenarios</h2>
+          <button
+            type="button"
+            className="rounded bg-slate-900 px-2 py-1 text-xs font-semibold text-white hover:bg-slate-700"
+            onClick={handleNewScenario}
+          >
+            New
+          </button>
         </div>
+        {isLoading ? (
+          <p className="text-sm text-slate-500">Loading scenarios...</p>
+        ) : scenarios.length === 0 ? (
+          <p className="text-sm text-slate-500">No saved scenarios yet.</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {scenarios.map((scenario) => {
+              const isActive = scenario.id === selectedScenarioId
+              return (
+                <li key={scenario.id}>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectScenario(scenario.id)}
+                    className={`w-full rounded border px-3 py-2 text-left text-sm transition hover:border-blue-400 ${
+                      isActive
+                        ? 'border-blue-500 bg-blue-50 text-blue-900'
+                        : 'border-slate-200 bg-white text-slate-700'
+                    }`}
+                  >
+                    <span className="block truncate font-medium">{scenario.title}</span>
+                    <span className="text-xs text-slate-500">
+                      Updated {new Date(scenario.updatedAt).toLocaleString()}
+                    </span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </aside>
 
-        <div className="flex flex-col gap-3">
-          <label className="flex flex-col gap-2">
-            <span className="text-sm font-medium text-slate-700">Step 파일명</span>
-            <input
-              className="rounded border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-              value={stepsName}
-              onChange={(event) => setStepsName(event.target.value)}
-              placeholder="example.steps.ts"
-            />
-          </label>
-          <div className="overflow-hidden rounded border border-slate-200 shadow-sm">
-            <Editor
-              height="400px"
-              defaultLanguage="typescript"
-              language="typescript"
-              value={stepsContent}
-              onChange={(value) => setStepsContent(value ?? '')}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 14,
-                wordWrap: 'on',
-                lineNumbers: 'on',
-                scrollBeyondLastLine: false,
-                suggest: {
-                  showSnippets: true,
-                },
-              }}
-            />
+      <div className="flex flex-1 flex-col gap-6">
+        <header className="flex flex-col gap-2">
+          <h1 className="text-2xl font-semibold text-slate-900">Scenario Editor</h1>
+          <p className="text-sm text-slate-600">
+            Draft feature and step code, save versions to Spring, and execute against the QA runner.
+          </p>
+        </header>
+
+        <section className="grid gap-6 rounded border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-[1fr_1fr]">
+          <div className="flex flex-col gap-3">
+            <label className="flex flex-col gap-2">
+              <span className="text-sm font-medium text-slate-700">Scenario title</span>
+              <input
+                className="rounded border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder={DEFAULT_TITLE}
+              />
+            </label>
+
+            <label className="flex flex-col gap-2">
+              <span className="text-sm font-medium text-slate-700">Feature file</span>
+              <input
+                className="rounded border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                value={featureName}
+                onChange={(event) => setFeatureName(event.target.value)}
+                placeholder={DEFAULT_FEATURE_NAME}
+              />
+            </label>
+            <div className="overflow-hidden rounded border border-slate-200 shadow-inner">
+              <Editor
+                height="400px"
+                language="gherkin"
+                value={featureContent}
+                onChange={(value) => setFeatureContent(value ?? '')}
+                options={{
+                  minimap: { enabled: false },
+                  fontSize: 14,
+                  wordWrap: 'on',
+                  lineNumbers: 'on',
+                  scrollBeyondLastLine: false,
+                }}
+              />
+            </div>
           </div>
-        </div>
-      </section>
 
-      <section className="flex flex-wrap gap-3">
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={isSaving || isRunning}
-          className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-400"
-        >
-          {isSaving ? '저장 중...' : '저장'}
-        </button>
-        <button
-          type="button"
-          onClick={handleRun}
-          disabled={isRunning || isSaving}
-          className="rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
-        >
-          {isRunning ? '실행 중...' : '실행'}
-        </button>
-      </section>
-
-      {(saveMessage || error) && (
-        <section>
-          {saveMessage && <p className="text-sm text-emerald-600">{saveMessage}</p>}
-          {error && <p className="text-sm text-red-600">{error}</p>}
-        </section>
-      )}
-
-      {runResult && (
-        <section className="flex flex-col gap-3 rounded border border-slate-200 p-4 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-800">실행 결과</h2>
-          {runResult.runDir && (
-            <p className="text-sm text-slate-600">
-              실행 디렉토리: <span className="font-mono">{runResult.runDir}</span>
-            </p>
-          )}
-          {runResult.stdout && (
-            <div>
-              <h3 className="text-sm font-semibold text-slate-700">STDOUT</h3>
-              <pre className="mt-1 max-h-40 overflow-auto rounded bg-slate-900 p-3 text-xs text-slate-100">
-                {runResult.stdout}
-              </pre>
+          <div className="flex flex-col gap-3">
+            <label className="flex flex-col gap-2">
+              <span className="text-sm font-medium text-slate-700">Step file</span>
+              <input
+                className="rounded border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                value={stepsName}
+                onChange={(event) => setStepsName(event.target.value)}
+                placeholder={DEFAULT_STEPS_NAME}
+              />
+            </label>
+            <div className="overflow-hidden rounded border border-slate-200 shadow-inner">
+              <Editor
+                height="400px"
+                language="typescript"
+                value={stepsContent}
+                onChange={(value) => setStepsContent(value ?? '')}
+                options={{
+                  minimap: { enabled: false },
+                  fontSize: 14,
+                  wordWrap: 'on',
+                  lineNumbers: 'on',
+                  scrollBeyondLastLine: false,
+                  suggest: {
+                    showSnippets: true,
+                  },
+                }}
+              />
             </div>
-          )}
-          {runResult.stderr && (
-            <div>
-              <h3 className="text-sm font-semibold text-slate-700">STDERR</h3>
-              <pre className="mt-1 max-h-40 overflow-auto rounded bg-slate-900 p-3 text-xs text-red-200">
-                {runResult.stderr}
-              </pre>
-            </div>
-          )}
+          </div>
         </section>
-      )}
+
+        <section className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={isSaving || isRunning}
+            className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+          >
+            {isSaving ? 'Saving…' : selectedScenarioId === null ? 'Save Scenario' : 'Update Scenario'}
+          </button>
+          <button
+            type="button"
+            onClick={handleRun}
+            disabled={isRunning || isSaving}
+            className="rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+          >
+            {isRunning ? 'Running…' : 'Run Scenario'}
+          </button>
+          <button
+            type="button"
+            onClick={handleDelete}
+            className="rounded border border-red-400 px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50"
+          >
+            Delete Scenario
+          </button>
+        </section>
+
+        {(feedback || error) && (
+          <section>
+            {feedback && <p className="text-sm text-emerald-600">{feedback}</p>}
+            {error && <p className="text-sm text-red-600">{error}</p>}
+          </section>
+        )}
+
+        {runResult && (
+          <section className="flex flex-col gap-3 rounded border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="text-lg font-semibold text-slate-800">Run output</h2>
+            {runResult.runDir && (
+              <p className="text-sm text-slate-600">
+                Run directory: <span className="font-mono">{runResult.runDir}</span>
+              </p>
+            )}
+            {runResult.stdout && (
+              <div>
+                <h3 className="text-sm font-semibold text-slate-700">STDOUT</h3>
+                <pre className="mt-1 max-h-48 overflow-auto rounded bg-slate-900 p-3 text-xs text-slate-100">
+                  {runResult.stdout}
+                </pre>
+              </div>
+            )}
+            {runResult.stderr && (
+              <div>
+                <h3 className="text-sm font-semibold text-slate-700">STDERR</h3>
+                <pre className="mt-1 max-h-48 overflow-auto rounded bg-slate-900 p-3 text-xs text-red-200">
+                  {runResult.stderr}
+                </pre>
+              </div>
+            )}
+          </section>
+        )}
+      </div>
     </div>
   )
 }
