@@ -36,7 +36,10 @@ async function collectDeclarationFiles(rootDir, files) {
         const absolutePath = path.join(rootDir, entry.name)
         if (entry.isDirectory()) {
             await collectDeclarationFiles(absolutePath, files)
-        } else if (entry.isFile() && entry.name.endsWith('.d.ts')) {
+        } else if (
+            entry.isFile() &&
+            (entry.name.endsWith('.d.ts') || entry.name === 'package.json')
+        ) {
             const relativePath = path
                 .relative(nodeModulesRoot, absolutePath)
                 .split(path.sep)

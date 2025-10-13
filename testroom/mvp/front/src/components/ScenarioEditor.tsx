@@ -256,6 +256,7 @@ function ScenarioEditor() {
   const [feedback, setFeedback] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [runResult, setRunResult] = useState<RunResponse | null>(null)
+  const [selectedScreenshot, setSelectedScreenshot] = useState<FailureAttachment | null>(null)
 
   useEffect(() => {
     if (!monaco) {
@@ -316,23 +317,43 @@ function ScenarioEditor() {
     }
   }, [monaco])
 
+  const normalizedFeatureName = useMemo(
+    () => featureName.trim() || DEFAULT_FEATURE_NAME,
+    [featureName]
+  )
+
+  const normalizedStepsName = useMemo(
+    () => stepsName.trim() || DEFAULT_STEPS_NAME,
+    [stepsName]
+  )
+
+  const featureEditorPath = useMemo(
+    () => `file:///scenario/${normalizedFeatureName}`,
+    [normalizedFeatureName]
+  )
+
+  const stepsEditorPath = useMemo(
+    () => `file:///scenario/${normalizedStepsName}`,
+    [normalizedStepsName]
+  )
+
   const scenarioPayload = useMemo<ScenarioPayload>(
     () => ({
       title: title.trim() || DEFAULT_TITLE,
       features: [
         {
-          name: featureName.trim() || DEFAULT_FEATURE_NAME,
+          name: normalizedFeatureName,
           content: featureContent,
         },
       ],
       steps: [
         {
-          name: stepsName.trim() || DEFAULT_STEPS_NAME,
+          name: normalizedStepsName,
           content: stepsContent,
         },
       ],
     }),
-    [title, featureName, featureContent, stepsName, stepsContent]
+    [title, normalizedFeatureName, featureContent, normalizedStepsName, stepsContent]
   )
 
   const runPayload = useMemo(
@@ -405,7 +426,26 @@ function ScenarioEditor() {
         const defaults = typescriptApi.typescriptDefaults
         const currentOptions = defaults.getCompilerOptions()
 
-        defaults.setCompilerOptions({
+        const modulePaths: Record<string, string[]> = {}
+        const ensureModulePath = (moduleName: string, relativePath: string) => {
+          const normalized = relativePath.replace(/\\/g, '/')
+          const uri = `file:///node_modules/${normalized}`
+          if (!files[uri]) {
+            return
+          }
+          modulePaths[moduleName] = modulePaths[moduleName] ?? []
+          if (!modulePaths[moduleName].includes(uri)) {
+            modulePaths[moduleName].push(uri)
+          }
+        }
+
+        ensureModulePath('@cucumber/cucumber', '@cucumber/cucumber/lib/index.d.ts')
+        ensureModulePath('@playwright/test', '@playwright/test/index.d.ts')
+        ensureModulePath('playwright-core', 'playwright-core/index.d.ts')
+        ensureModulePath('playwright', 'playwright/index.d.ts')
+        ensureModulePath('playwright/test', 'playwright/types/test.d.ts')
+
+        const nextCompilerOptions = {
           ...currentOptions,
           allowJs: true,
           allowSyntheticDefaultImports: true,
@@ -415,10 +455,31 @@ function ScenarioEditor() {
           target: typescriptApi.ScriptTarget.ES2020,
           typeRoots: [],
           types: [],
-        })
+          paths:
+            Object.keys(modulePaths).length > 0
+              ? {
+                  ...(currentOptions.paths ?? {}),
+                  ...modulePaths,
+                }
+              : currentOptions.paths,
+        }
+
+        defaults.setCompilerOptions(nextCompilerOptions)
         defaults.setEagerModelSync(true)
 
-        Object.entries(files).forEach(([uri, content]) => disposables.push(defaults.addExtraLib(content, uri)))
+        const importMetaLib = `interface ImportMetaEnv {
+  readonly VITE_API_BASE_URL?: string
+  readonly [key: string]: string | undefined
+}
+interface ImportMeta {
+  readonly env: ImportMetaEnv
+}
+`
+        disposables.push(defaults.addExtraLib(importMetaLib, 'file:///scenario/import-meta.d.ts'))
+
+        Object.entries(files).forEach(([uri, content]) => {
+          disposables.push(defaults.addExtraLib(content, uri))
+        })
       } catch (error) {
         if (!disposed) {
           console.error('ScenarioEditor: failed to load QA type definitions bundle', error)
@@ -621,50 +682,51 @@ function ScenarioEditor() {
   }, [runPayload])
 
   return (
-    <div className="flex min-h-screen flex-col gap-6 bg-slate-100 p-6 lg:flex-row">
-      <aside className="flex w-full flex-col gap-4 rounded border border-slate-200 bg-white p-4 shadow-sm lg:w-72">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-800">Scenarios</h2>
-          <button
-            type="button"
-            className="rounded bg-slate-900 px-2 py-1 text-xs font-semibold text-white hover:bg-slate-700"
-            onClick={handleNewScenario}
-          >
-            New
-          </button>
-        </div>
-        {isLoading ? (
-          <p className="text-sm text-slate-500">Loading scenarios...</p>
-        ) : scenarios.length === 0 ? (
-          <p className="text-sm text-slate-500">No saved scenarios yet.</p>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {scenarios.map((scenario) => {
-              const isActive = scenario.id === selectedScenarioId
-              return (
-                <li key={scenario.id}>
-                  <button
-                    type="button"
-                    onClick={() => handleSelectScenario(scenario.id)}
-                    className={`w-full rounded border px-3 py-2 text-left text-sm transition hover:border-blue-400 ${
-                      isActive
-                        ? 'border-blue-500 bg-blue-50 text-blue-900'
-                        : 'border-slate-200 bg-white text-slate-700'
-                    }`}
-                  >
-                    <span className="block truncate font-medium">{scenario.title}</span>
-                    <span className="text-xs text-slate-500">
-                      Updated {new Date(scenario.updatedAt).toLocaleString()}
-                    </span>
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      </aside>
+    <>
+      <div className="flex min-h-screen flex-col gap-6 bg-slate-100 p-6 lg:flex-row">
+        <aside className="flex w-full flex-col gap-4 rounded border border-slate-200 bg-white p-4 shadow-sm lg:w-72">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-slate-800">Scenarios</h2>
+            <button
+              type="button"
+              className="rounded bg-slate-900 px-2 py-1 text-xs font-semibold text-white hover:bg-slate-700"
+              onClick={handleNewScenario}
+            >
+              New
+            </button>
+          </div>
+          {isLoading ? (
+            <p className="text-sm text-slate-500">Loading scenarios...</p>
+          ) : scenarios.length === 0 ? (
+            <p className="text-sm text-slate-500">No saved scenarios yet.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {scenarios.map((scenario) => {
+                const isActive = scenario.id === selectedScenarioId
+                return (
+                  <li key={scenario.id}>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectScenario(scenario.id)}
+                      className={`w-full rounded border px-3 py-2 text-left text-sm transition hover:border-blue-400 ${
+                        isActive
+                          ? 'border-blue-500 bg-blue-50 text-blue-900'
+                          : 'border-slate-200 bg-white text-slate-700'
+                      }`}
+                    >
+                      <span className="block truncate font-medium">{scenario.title}</span>
+                      <span className="text-xs text-slate-500">
+                        Updated {new Date(scenario.updatedAt).toLocaleString()}
+                      </span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </aside>
 
-      <div className="flex flex-1 flex-col gap-6">
+        <div className="flex flex-1 flex-col gap-6 min-w-0">
         <header className="flex flex-col gap-2">
           <h1 className="text-2xl font-semibold text-slate-900">Scenario Editor</h1>
           <p className="text-sm text-slate-600">
@@ -672,8 +734,8 @@ function ScenarioEditor() {
           </p>
         </header>
 
-        <section className="grid gap-6 rounded border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-[1fr_1fr]">
-          <div className="flex flex-col gap-3">
+        <section className="grid gap-6 rounded border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-[1fr_1fr] min-w-0">
+          <div className="flex flex-col gap-3 min-w-0">
             <label className="flex flex-col gap-2">
               <span className="text-sm font-medium text-slate-700">Scenario title</span>
               <input
@@ -696,6 +758,7 @@ function ScenarioEditor() {
             <div className="overflow-hidden rounded border border-slate-200 shadow-inner">
               <Editor
                 height="400px"
+                path={featureEditorPath}
                 language="gherkin"
                 value={featureContent}
                 onChange={(value) => setFeatureContent(value ?? '')}
@@ -710,7 +773,7 @@ function ScenarioEditor() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 min-w-0">
             <label className="flex flex-col gap-2">
               <span className="text-sm font-medium text-slate-700">Step file</span>
               <input
@@ -723,6 +786,7 @@ function ScenarioEditor() {
             <div className="overflow-hidden rounded border border-slate-200 shadow-inner">
               <Editor
                 height="400px"
+                path={stepsEditorPath}
                 language="typescript"
                 value={stepsContent}
                 onChange={(value) => setStepsContent(value ?? '')}
@@ -775,7 +839,7 @@ function ScenarioEditor() {
         )}
 
         {runResult && (
-          <section className="flex flex-col gap-3 rounded border border-slate-200 bg-white p-4 shadow-sm">
+          <section className="flex flex-col gap-3 rounded border border-slate-200 bg-white p-4 shadow-sm overflow-x-hidden">
             <h2 className="text-lg font-semibold text-slate-800">Run output</h2>
             {runResult.runDir && (
               <p className="text-sm text-slate-600">
@@ -785,7 +849,7 @@ function ScenarioEditor() {
             {runResult.error && (
               <div>
                 <h3 className="text-sm font-semibold text-red-600">Error</h3>
-                <pre className="mt-1 max-h-48 overflow-auto rounded bg-rose-50 p-3 text-xs text-rose-700">
+                <pre className="mt-1 max-h-48 w-full overflow-auto rounded bg-rose-50 p-3 text-xs text-rose-700">
                   {runResult.error}
                 </pre>
               </div>
@@ -797,7 +861,7 @@ function ScenarioEditor() {
                   {failureDetails.messages.map((message, index) => (
                     <pre
                       key={`failure-message-${index}`}
-                      className="max-h-48 overflow-auto rounded bg-amber-50 p-3 text-xs text-amber-800"
+                      className="max-h-48 w-full overflow-auto rounded bg-amber-50 p-3 text-xs text-amber-800"
                     >
                       {message}
                     </pre>
@@ -808,7 +872,7 @@ function ScenarioEditor() {
             {runResult.stdout && (
               <div>
                 <h3 className="text-sm font-semibold text-slate-700">STDOUT</h3>
-                <pre className="mt-1 max-h-48 overflow-auto rounded bg-slate-900 p-3 text-xs text-slate-100">
+                <pre className="mt-1 max-h-48 w-full overflow-auto rounded bg-slate-900 p-3 text-xs text-slate-100">
                   {runResult.stdout}
                 </pre>
               </div>
@@ -816,7 +880,7 @@ function ScenarioEditor() {
             {runResult.stderr && (
               <div>
                 <h3 className="text-sm font-semibold text-slate-700">STDERR</h3>
-                <pre className="mt-1 max-h-48 overflow-auto rounded bg-slate-900 p-3 text-xs text-red-200">
+                <pre className="mt-1 max-h-48 w-full overflow-auto rounded bg-slate-900 p-3 text-xs text-red-200">
                   {runResult.stderr}
                 </pre>
               </div>
@@ -828,11 +892,15 @@ function ScenarioEditor() {
                   {imageAttachments.map((attachment) => {
                     const dataUrl = `data:${attachment.mimeType};base64,${attachment.data}`
                     return (
-                      <figure key={attachment.id} className="flex flex-col gap-1">
+                      <figure
+                        key={attachment.id}
+                        className="flex max-w-xs flex-col gap-1"
+                      >
                         <img
                           src={dataUrl}
                           alt={attachment.stepName ?? 'Failure screenshot'}
-                          className="max-h-60 rounded border border-slate-200 bg-slate-100 object-contain"
+                          className="h-auto max-h-60 w-full cursor-zoom-in rounded border border-slate-200 bg-slate-100 object-contain transition hover:shadow-lg"
+                          onClick={() => setSelectedScreenshot(attachment)}
                         />
                         <figcaption className="text-xs text-slate-600">
                           {attachment.scenarioName && (
@@ -863,7 +931,7 @@ function ScenarioEditor() {
                           {attachment.scenarioName && `${attachment.scenarioName}: `}
                           {attachment.stepName ?? 'After hook log'}
                         </p>
-                        <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs text-slate-700">
+                        <pre className="mt-1 max-h-48 w-full overflow-auto whitespace-pre-wrap break-words text-xs text-slate-700">
                           {decoded}
                         </pre>
                       </div>
@@ -875,7 +943,32 @@ function ScenarioEditor() {
           </section>
         )}
       </div>
-    </div>
+      </div>
+      {selectedScreenshot && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setSelectedScreenshot(null)}
+        >
+          <div
+            className="relative max-h-[90vh] max-w-[90vw]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <img
+              src={`data:${selectedScreenshot.mimeType};base64,${selectedScreenshot.data}`}
+              alt={selectedScreenshot.stepName ?? 'Failure screenshot'}
+              className="h-auto max-h-[90vh] w-auto max-w-[90vw] rounded shadow-2xl"
+            />
+            <button
+              type="button"
+              className="absolute right-2 top-2 rounded bg-black/60 px-3 py-1 text-sm font-semibold text-white hover:bg-black/80"
+              onClick={() => setSelectedScreenshot(null)}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 
