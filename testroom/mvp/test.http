@@ -1,0 +1,17 @@
+POST http://localhost:3000/run
+Content-Type: application/json
+
+{
+  "features": [
+    {
+      "name": "example.feature",
+      "content": "Feature: Example\\n  Scenario: Visit Playwright\\n    Given I open playwright homepage\\n    Then the title should contain Playwright"
+    }
+  ],
+  "steps": [
+    {
+      "name": "example.steps.ts",
+      "content": "import { Given, Then } from '@cucumber/cucumber';\\nimport { expect } from '@playwright/test';\\n\\nGiven('I open playwright homepage', async function () {\\n  await this.page.goto('https://playwright.dev');\\n});\\n\\nThen('the title should contain Playwright', async function () {\\n  await expect(this.page).toHaveTitle(/Playwright/);\\n});"
+    }
+  ]
+}
