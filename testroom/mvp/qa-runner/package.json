@@ -1,0 +1,21 @@
+{
+  "name": "qa-runner",
+  "version": "1.0.0",
+  "description": "이 프로젝트는 Playwright와 Cucumber 기반의 QA 테스트를 HTTP API 형태로 실행하는 러너를 제공합니다. Docker 컨테이너로 실행하는 방법과 로컬에서 직접 실행하는 방법을 모두 설명합니다.",
+  "main": "cucumber.js",
+  "scripts": {
+    "runner": "node runner.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@cucumber/cucumber": "^12.2.0",
+    "@playwright/test": "^1.56.0",
+    "express": "^5.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

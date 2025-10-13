@@ -94,10 +94,15 @@ async function materializeRunDir(body) {
 }
 
 function runCucumber(opts) {
-  const cucumberBin =
-    process.platform === 'win32'
-      ? path.join(__dirname, 'node_modules', '.bin', 'cucumber-js.cmd')
-      : path.join(__dirname, 'node_modules', '.bin', 'cucumber-js');
+  let cucumberCliPath;
+  try {
+    const cucumberPkgPath = require.resolve('@cucumber/cucumber/package.json');
+    cucumberCliPath = path.join(path.dirname(cucumberPkgPath), 'bin', 'cucumber.js');
+  } catch (err) {
+    throw new Error(
+      'Cannot resolve @cucumber/cucumber CLI. Ensure dependencies are installed.'
+    );
+  }
 
   const args = ['--config', 'cucumber.js', 'features'];
 
@@ -113,7 +118,7 @@ function runCucumber(opts) {
   };
 
   return new Promise((resolve, reject) => {
-    const child = spawn(cucumberBin, args, {
+    const child = spawn(process.execPath, [cucumberCliPath, ...args], {
       cwd: opts.runDir,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
