@@ -15,4 +15,4 @@ jwt:
 
 runner:
   url: ${RUNNER_URL:http://localhost:3000}
-  timeout: 30s
+  timeout: 300s

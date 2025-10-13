@@ -12,6 +12,20 @@ const TMP_BASE = process.env.RUNNER_TMP_BASE || path.join(os.tmpdir());
 const app = express();
 app.use(express.json({ limit: '5mb' }));
 
+async function readRunReport(runDir) {
+  if (!runDir) {
+    return null;
+  }
+
+  try {
+    const reportPath = path.join(runDir, 'report.json');
+    const reportContent = await fs.readFile(reportPath, 'utf8');
+    return JSON.parse(reportContent);
+  } catch (err) {
+    return null;
+  }
+}
+
 function normalizeContent(text) {
   if (typeof text !== 'string') {
     return text;
@@ -154,6 +168,7 @@ async function seedSupportFiles(runDir) {
   const cucumberConfigPath = path.join(__dirname, 'cucumber.js');
   const tsconfigPath = path.join(__dirname, 'tsconfig.json');
   const worldDest = path.join(runDir, 'world.ts');
+  const featureWorldDest = path.join(runDir, 'features', 'world.ts');
   const cucumberDest = path.join(runDir, 'cucumber.js');
   const tsconfigDest = path.join(runDir, 'tsconfig.json');
 
@@ -162,6 +177,14 @@ async function seedSupportFiles(runDir) {
     fs.copyFile(cucumberConfigPath, cucumberDest),
     fs.copyFile(tsconfigPath, tsconfigDest),
   ]);
+
+  const featureDir = path.join(runDir, 'features');
+  await fs.mkdir(featureDir, { recursive: true });
+  await fs.writeFile(
+    featureWorldDest,
+    "export * from '../world';\n",
+    'utf8'
+  );
 }
 
 app.post('/run', async (req, res) => {
@@ -173,19 +196,12 @@ app.post('/run', async (req, res) => {
   }
 
   let context;
+  let report = null;
   try {
     context = await materializeRunDir(req.body);
     await seedSupportFiles(context.runDir);
     const result = await runCucumber(context);
-
-    let report = null;
-    try {
-      const reportPath = path.join(context.runDir, 'report.json');
-      const reportContent = await fs.readFile(reportPath, 'utf8');
-      report = JSON.parse(reportContent);
-    } catch {
-      report = null;
-    }
+    report = await readRunReport(context.runDir);
 
     res.json({
       runDir: context.runDir,
@@ -194,10 +210,16 @@ app.post('/run', async (req, res) => {
       report,
     });
   } catch (err) {
+    if (!report) {
+      report = await readRunReport(context?.runDir);
+    }
+
     res.status(500).json({
       error: err.message,
       stdout: err.stdout,
       stderr: err.stderr,
+      runDir: context?.runDir,
+      report,
     });
   }
 });

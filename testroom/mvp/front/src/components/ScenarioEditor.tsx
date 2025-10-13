@@ -25,7 +25,8 @@ type RunResponse = {
   runDir?: string
   stdout?: string
   stderr?: string
-  report?: unknown
+  report?: CucumberReport
+  error?: string
 }
 
 type TypeDefinitionResponse = {
@@ -57,6 +58,184 @@ Then('I should see the expected result', async function () {
   // TODO: add assertions
 });
 `
+
+function extractFailureDetails(report: CucumberReport | undefined | null): FailureDetails {
+  const details: FailureDetails = { attachments: [], messages: [] }
+  if (!Array.isArray(report)) {
+    return details
+  }
+
+  const pushEmbeddings = (
+    embeddings: CucumberEmbedding[] | undefined,
+    baseId: string,
+    scenarioName: string | undefined,
+    stepName: string | undefined
+  ) => {
+    embeddings?.forEach((embedding, embeddingIndex) => {
+      const data = embedding.data ?? embedding.media?.data
+      const encoding = embedding.media?.encoding
+      const mimeType = embedding.mime_type ?? embedding.mediaType ?? embedding.media?.type
+      if (!data || !mimeType) {
+        return
+      }
+      if (encoding && encoding !== 'base64') {
+        return
+      }
+      details.attachments.push({
+        id: `${baseId}-embedding-${embeddingIndex}`,
+        mimeType,
+        data,
+        scenarioName,
+        stepName,
+      })
+    })
+  }
+
+  const pushAttachments = (
+    attachments: CucumberAttachment[] | undefined,
+    baseId: string,
+    scenarioName: string | undefined,
+    stepName: string | undefined
+  ) => {
+    attachments?.forEach((attachment, attachmentIndex) => {
+      const data = attachment.data ?? attachment.body
+      const mimeType = attachment.mediaType
+      const encoding = attachment.contentEncoding
+      if (!data || !mimeType) {
+        return
+      }
+      if (encoding && encoding !== 'base64') {
+        return
+      }
+      details.attachments.push({
+        id: `${baseId}-attachment-${attachmentIndex}`,
+        mimeType,
+        data,
+        scenarioName,
+        stepName,
+      })
+    })
+  }
+
+  report.forEach((feature, featureIndex) => {
+    feature.elements?.forEach((scenario, scenarioIndex) => {
+      const steps = scenario.steps ?? []
+      const hooks = [...(scenario.before ?? []), ...(scenario.after ?? [])]
+
+      const scenarioFailed =
+        steps.some((step) => step.result?.status?.toLowerCase() === 'failed') ||
+        hooks.some((hook) => hook.result?.status?.toLowerCase() === 'failed') ||
+        (scenario.after ?? []).some(
+          (hook) =>
+            (hook.attachments && hook.attachments.length > 0) ||
+            (hook.embeddings && hook.embeddings.length > 0) ||
+            hook.text
+        )
+
+      if (!scenarioFailed) {
+        return
+      }
+
+      steps.forEach((step, stepIndex) => {
+        const status = step.result?.status?.toLowerCase()
+        if (status === 'failed' && step.result?.error_message) {
+          details.messages.push(step.result.error_message)
+        }
+
+        const baseId = `${featureIndex}-${scenarioIndex}-${stepIndex}`
+        const scenarioName = scenario.name
+        const stepName = step.name
+
+        pushEmbeddings(step.embeddings, baseId, scenarioName, stepName)
+        pushAttachments(step.attachments, baseId, scenarioName, stepName)
+      })
+
+      ;(scenario.after ?? []).forEach((hook, hookIndex) => {
+        const hookStatus = hook.result?.status?.toLowerCase()
+        if (hookStatus === 'failed' && hook.result?.error_message) {
+          details.messages.push(hook.result.error_message)
+        }
+        if (hook.text) {
+          details.messages.push(hook.text)
+        }
+
+        const baseId = `${featureIndex}-${scenarioIndex}-after-${hookIndex}`
+        const scenarioName = scenario.name
+        const stepName = 'After hook'
+
+        pushEmbeddings(hook.embeddings, baseId, scenarioName, stepName)
+        pushAttachments(hook.attachments, baseId, scenarioName, stepName)
+      })
+    })
+  })
+
+  return details
+}
+
+type CucumberEmbedding = {
+  data?: string
+  mime_type?: string
+  mediaType?: string
+  media?: {
+    type?: string
+    encoding?: string
+    data?: string
+  }
+}
+
+type CucumberAttachment = {
+  data?: string
+  mediaType?: string
+  contentEncoding?: string
+  body?: string
+}
+
+type CucumberHook = {
+  result?: {
+    status?: string
+    error_message?: string
+  }
+  embeddings?: CucumberEmbedding[]
+  attachments?: CucumberAttachment[]
+  text?: string
+}
+
+type CucumberStep = {
+  name?: string
+  result?: {
+    status?: string
+    error_message?: string
+  }
+  embeddings?: CucumberEmbedding[]
+  attachments?: CucumberAttachment[]
+}
+
+type CucumberElement = {
+  name?: string
+  steps?: CucumberStep[]
+  before?: CucumberHook[]
+  after?: CucumberHook[]
+}
+
+type CucumberFeature = {
+  name?: string
+  elements?: CucumberElement[]
+}
+
+type CucumberReport = CucumberFeature[]
+
+type FailureAttachment = {
+  id: string
+  mimeType: string
+  data: string
+  scenarioName?: string
+  stepName?: string
+}
+
+type FailureDetails = {
+  attachments: FailureAttachment[]
+  messages: string[]
+}
 
 function ScenarioEditor() {
   const monaco = useMonaco()
@@ -256,6 +435,16 @@ function ScenarioEditor() {
     }
   }, [monaco])
 
+  const failureDetails = useMemo(() => extractFailureDetails(runResult?.report), [runResult])
+  const imageAttachments = useMemo(
+    () => failureDetails.attachments.filter((attachment) => attachment.mimeType.startsWith('image/')),
+    [failureDetails.attachments]
+  )
+  const textAttachments = useMemo(
+    () => failureDetails.attachments.filter((attachment) => attachment.mimeType.startsWith('text/')),
+    [failureDetails.attachments]
+  )
+
   const applyScenario = useCallback((scenario: ScenarioRecord) => {
     setSelectedScenarioId(scenario.id)
     setTitle(scenario.title ?? DEFAULT_TITLE)
@@ -396,11 +585,31 @@ function ScenarioEditor() {
     setRunResult(null)
 
     try {
-      const data = await fetchJson<RunResponse>('/api/run', {
+      const response = await fetch(`${API_BASE_URL}/api/run`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(runPayload),
       })
-      setRunResult(data ?? { stdout: 'Run completed.' })
+
+      let payload: RunResponse | null = null
+      try {
+        payload = (await response.json()) as RunResponse
+      } catch {
+        payload = null
+      }
+
+      if (!response.ok) {
+        const message =
+          payload?.error ||
+          `Failed to execute the scenario. Server responded with status ${response.status}.`
+        setError(message)
+        if (payload) {
+          setRunResult(payload)
+        }
+        return
+      }
+
+      setRunResult(payload ?? { stdout: 'Run completed.' })
       setFeedback('Scenario executed.')
     } catch (err) {
       const message =
@@ -409,7 +618,7 @@ function ScenarioEditor() {
     } finally {
       setIsRunning(false)
     }
-  }, [fetchJson, runPayload])
+  }, [runPayload])
 
   return (
     <div className="flex min-h-screen flex-col gap-6 bg-slate-100 p-6 lg:flex-row">
@@ -573,6 +782,29 @@ function ScenarioEditor() {
                 Run directory: <span className="font-mono">{runResult.runDir}</span>
               </p>
             )}
+            {runResult.error && (
+              <div>
+                <h3 className="text-sm font-semibold text-red-600">Error</h3>
+                <pre className="mt-1 max-h-48 overflow-auto rounded bg-rose-50 p-3 text-xs text-rose-700">
+                  {runResult.error}
+                </pre>
+              </div>
+            )}
+            {failureDetails.messages.length > 0 && (
+              <div>
+                <h3 className="text-sm font-semibold text-red-600">Failure details</h3>
+                <div className="mt-1 space-y-2">
+                  {failureDetails.messages.map((message, index) => (
+                    <pre
+                      key={`failure-message-${index}`}
+                      className="max-h-48 overflow-auto rounded bg-amber-50 p-3 text-xs text-amber-800"
+                    >
+                      {message}
+                    </pre>
+                  ))}
+                </div>
+              </div>
+            )}
             {runResult.stdout && (
               <div>
                 <h3 className="text-sm font-semibold text-slate-700">STDOUT</h3>
@@ -587,6 +819,57 @@ function ScenarioEditor() {
                 <pre className="mt-1 max-h-48 overflow-auto rounded bg-slate-900 p-3 text-xs text-red-200">
                   {runResult.stderr}
                 </pre>
+              </div>
+            )}
+            {imageAttachments.length > 0 && (
+              <div>
+                <h3 className="text-sm font-semibold text-slate-700">Captured screenshots</h3>
+                <div className="mt-2 flex flex-wrap gap-4">
+                  {imageAttachments.map((attachment) => {
+                    const dataUrl = `data:${attachment.mimeType};base64,${attachment.data}`
+                    return (
+                      <figure key={attachment.id} className="flex flex-col gap-1">
+                        <img
+                          src={dataUrl}
+                          alt={attachment.stepName ?? 'Failure screenshot'}
+                          className="max-h-60 rounded border border-slate-200 bg-slate-100 object-contain"
+                        />
+                        <figcaption className="text-xs text-slate-600">
+                          {attachment.scenarioName && (
+                            <span className="font-medium">{attachment.scenarioName}: </span>
+                          )}
+                          {attachment.stepName ?? 'Screenshot'}
+                        </figcaption>
+                      </figure>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+            {textAttachments.length > 0 && (
+              <div>
+                <h3 className="text-sm font-semibold text-slate-700">Failure logs</h3>
+                <div className="mt-2 space-y-2">
+                  {textAttachments.map((attachment) => {
+                    let decoded = attachment.data
+                    try {
+                      decoded = atob(attachment.data)
+                    } catch {
+                      // ignore decoding errors
+                    }
+                    return (
+                      <div key={attachment.id} className="rounded border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-xs font-medium text-slate-600">
+                          {attachment.scenarioName && `${attachment.scenarioName}: `}
+                          {attachment.stepName ?? 'After hook log'}
+                        </p>
+                        <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs text-slate-700">
+                          {decoded}
+                        </pre>
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             )}
           </section>

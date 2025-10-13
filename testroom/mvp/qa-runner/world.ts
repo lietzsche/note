@@ -5,11 +5,14 @@ import {
   AfterAll,
   Before,
   After,
+  Status,
 } from '@cucumber/cucumber';
+import type { ITestCaseHookParameter, IWorld } from '@cucumber/cucumber';
 import { chromium, Browser, BrowserContext, Page } from '@playwright/test';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 
 declare module '@cucumber/cucumber' {
-  // eslint-disable-next-line @typescript-eslint/no-empty-interface
   interface World {
     browser?: Browser;
     context?: BrowserContext;
@@ -33,7 +36,11 @@ AfterAll(async () => {
   }
 });
 
-class CustomWorld {
+class CustomWorld implements IWorld {
+  declare readonly attach: IWorld['attach'];
+  declare readonly log: IWorld['log'];
+  declare readonly link: IWorld['link'];
+  declare readonly parameters: IWorld['parameters'];
   browser?: Browser;
   context?: BrowserContext;
   page?: Page;
@@ -58,11 +65,32 @@ class CustomWorld {
 
 setWorldConstructor(CustomWorld);
 
-Before(async function () {
+export { CustomWorld };
+
+Before(async function (this: CustomWorld) {
   await this.initContext();
 });
 
-After(async function () {
+After(async function (this: CustomWorld, scenario: ITestCaseHookParameter) {
+  if (scenario.result?.status === Status.FAILED && this.page) {
+    try {
+      const screenshot = await this.page.screenshot({ fullPage: true });
+      const artifactsDir = path.join(process.env.RUN_TMP_DIR ?? process.cwd(), 'artifacts');
+      await fs.mkdir(artifactsDir, { recursive: true });
+      const fileName = `failure-${Date.now()}.png`;
+      const filePath = path.join(artifactsDir, fileName);
+      await fs.writeFile(filePath, screenshot);
+      if (typeof this.attach === 'function') {
+        await this.attach(`Screenshot captured: ${fileName}`, 'text/plain');
+        await this.attach(screenshot, 'image/png');
+      }
+    } catch (error) {
+      await this.attach(
+        `Failed to capture screenshot: ${error instanceof Error ? error.message : String(error)}`,
+        'text/plain'
+      );
+    }
+  }
+
   await this.destroyContext();
 });
-
