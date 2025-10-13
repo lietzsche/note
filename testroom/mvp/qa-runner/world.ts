@@ -7,7 +7,7 @@ import {
   After,
   Status,
 } from '@cucumber/cucumber';
-import type { ITestCaseHookParameter, IWorld } from '@cucumber/cucumber';
+import type { ITestCaseHookParameter, IWorld, IWorldOptions } from '@cucumber/cucumber';
 import { chromium, Browser, BrowserContext, Page } from '@playwright/test';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -37,13 +37,20 @@ AfterAll(async () => {
 });
 
 class CustomWorld implements IWorld {
-  declare readonly attach: IWorld['attach'];
-  declare readonly log: IWorld['log'];
-  declare readonly link: IWorld['link'];
-  declare readonly parameters: IWorld['parameters'];
+  readonly attach: IWorld['attach'];
+  readonly log: IWorld['log'];
+  readonly link: IWorld['link'];
+  readonly parameters: IWorld['parameters'];
   browser?: Browser;
   context?: BrowserContext;
   page?: Page;
+
+  constructor(options: IWorldOptions) {
+    this.attach = options.attach;
+    this.log = options.log;
+    this.link = options.link;
+    this.parameters = options.parameters;
+  }
 
   async initContext() {
     if (!sharedBrowser) {
