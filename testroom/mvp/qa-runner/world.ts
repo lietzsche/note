@@ -10,7 +10,7 @@ import {
 import type { ITestCaseHookParameter, IWorld, IWorldOptions } from '@cucumber/cucumber';
 import { chromium, Browser, BrowserContext, Page } from '@playwright/test';
 import { promises as fs } from 'node:fs';
-import path from 'node:path';
+import * as path from 'node:path';
 
 declare module '@cucumber/cucumber' {
   interface World {
