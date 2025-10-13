@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Editor, { useMonaco } from '@monaco-editor/react'
 
 type ScenarioAsset = {
@@ -26,6 +26,10 @@ type RunResponse = {
   stdout?: string
   stderr?: string
   report?: unknown
+}
+
+type TypeDefinitionResponse = {
+  files: Record<string, string>
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
@@ -56,6 +60,7 @@ Then('I should see the expected result', async function () {
 
 function ScenarioEditor() {
   const monaco = useMonaco()
+  const typeLibrariesLoadedRef = useRef(false)
 
   const [scenarios, setScenarios] = useState<ScenarioRecord[]>([])
   const [selectedScenarioId, setSelectedScenarioId] = useState<number | null>(null)
@@ -179,6 +184,77 @@ function ScenarioEditor() {
     },
     []
   )
+
+  useEffect(() => {
+    if (!monaco || typeLibrariesLoadedRef.current) {
+      return
+    }
+
+    let disposed = false
+    const disposables: { dispose: () => void }[] = []
+
+    const loadTypeDefinitions = async () => {
+      const typescriptApi = monaco.languages?.typescript
+      if (!typescriptApi) {
+        return
+      }
+
+      try {
+        const response = await fetch(`${import.meta.env.BASE_URL}qa-type-definitions.json`, {
+          cache: 'force-cache',
+        })
+
+        if (!response.ok) {
+          throw new Error(`Request failed with status ${response.status}`)
+        }
+
+        const bundle = (await response.json()) as TypeDefinitionResponse
+
+        if (disposed) {
+          return
+        }
+
+        const files = bundle?.files ?? {}
+        if (!Object.keys(files).length) {
+          console.warn('ScenarioEditor: QA type definitions bundle is empty')
+          typeLibrariesLoadedRef.current = true
+          return
+        }
+
+        typeLibrariesLoadedRef.current = true
+
+        const defaults = typescriptApi.typescriptDefaults
+        const currentOptions = defaults.getCompilerOptions()
+
+        defaults.setCompilerOptions({
+          ...currentOptions,
+          allowJs: true,
+          allowSyntheticDefaultImports: true,
+          module: typescriptApi.ModuleKind.CommonJS,
+          moduleResolution: typescriptApi.ModuleResolutionKind.NodeJs,
+          noEmit: true,
+          target: typescriptApi.ScriptTarget.ES2020,
+          typeRoots: [],
+          types: [],
+        })
+        defaults.setEagerModelSync(true)
+
+        Object.entries(files).forEach(([uri, content]) => disposables.push(defaults.addExtraLib(content, uri)))
+      } catch (error) {
+        if (!disposed) {
+          console.error('ScenarioEditor: failed to load QA type definitions bundle', error)
+        }
+      }
+    }
+
+    loadTypeDefinitions()
+
+    return () => {
+      disposed = true
+      disposables.forEach((disposable) => disposable.dispose())
+      typeLibrariesLoadedRef.current = false
+    }
+  }, [monaco])
 
   const applyScenario = useCallback((scenario: ScenarioRecord) => {
     setSelectedScenarioId(scenario.id)

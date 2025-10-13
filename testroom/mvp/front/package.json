@@ -4,7 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "predev": "node scripts/collect-qa-types.mjs",
+    "prebuild": "node scripts/collect-qa-types.mjs",
+    "dev": "npm run predev && vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
