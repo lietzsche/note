@@ -17,7 +17,13 @@ public class RunService {
             WebClient.Builder webClientBuilder,
             @Value("${runner.url}") String runnerBaseUrl,
             @Value("${runner.timeout:300s}") Duration timeout) {
-        this.webClient = webClientBuilder.baseUrl(runnerBaseUrl).build();
+        this.webClient = webClientBuilder
+                .baseUrl(runnerBaseUrl)
+                .exchangeStrategies(builder -> builder
+                        .codecs(configurer ->
+                                configurer.defaultCodecs().maxInMemorySize(16 * 1024 * 1024)) // 16MB로 증가
+                        .build())
+                .build();
         this.timeout = timeout.isZero() ? Duration.ofSeconds(300) : timeout;
     }
 
