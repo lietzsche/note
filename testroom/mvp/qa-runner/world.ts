@@ -9,8 +9,6 @@ import {
 } from '@cucumber/cucumber';
 import type { ITestCaseHookParameter, IWorld, IWorldOptions } from '@cucumber/cucumber';
 import { chromium, Browser, BrowserContext, Page } from '@playwright/test';
-import { promises as fs } from 'node:fs';
-import * as path from 'node:path';
 
 declare module '@cucumber/cucumber' {
   interface World {
@@ -82,11 +80,7 @@ After(async function (this: CustomWorld, scenario: ITestCaseHookParameter) {
   if (scenario.result?.status === Status.FAILED && this.page) {
     try {
       const screenshot = await this.page.screenshot({ fullPage: true });
-      const artifactsDir = path.join(process.env.RUN_TMP_DIR ?? process.cwd(), 'artifacts');
-      await fs.mkdir(artifactsDir, { recursive: true });
       const fileName = `failure-${Date.now()}.png`;
-      const filePath = path.join(artifactsDir, fileName);
-      await fs.writeFile(filePath, screenshot);
       if (typeof this.attach === 'function') {
         await this.attach(`Screenshot captured: ${fileName}`, 'text/plain');
         await this.attach(screenshot, 'image/png');

@@ -16,8 +16,6 @@ import lombok.NoArgsConstructor;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class RunResponse {
 
-    private String runDir;
-
     private String stdout;
 
     private String stderr;

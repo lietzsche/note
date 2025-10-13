@@ -42,7 +42,6 @@ class RunServiceTest {
                         .setBody(
                                 """
                                     {
-                                      "runDir": "/tmp/run-123",
                                       "stdout": "Scenario passed",
                                       "stderr": "",
                                       "report": { "passed": true }
@@ -67,7 +66,6 @@ class RunServiceTest {
 
         RunResponse response = runService.execute(request);
 
-        assertThat(response.getRunDir()).isEqualTo("/tmp/run-123");
         assertThat(response.getStdout()).contains("Scenario passed");
 
         RecordedRequest recordedRequest = mockWebServer.takeRequest();

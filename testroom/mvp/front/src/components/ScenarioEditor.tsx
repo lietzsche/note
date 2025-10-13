@@ -22,7 +22,6 @@ type ScenarioPayload = {
 }
 
 type RunResponse = {
-  runDir?: string
   stdout?: string
   stderr?: string
   report?: CucumberReport
@@ -841,11 +840,6 @@ interface ImportMeta {
         {runResult && (
           <section className="flex flex-col gap-3 rounded border border-slate-200 bg-white p-4 shadow-sm overflow-x-hidden">
             <h2 className="text-lg font-semibold text-slate-800">Run output</h2>
-            {runResult.runDir && (
-              <p className="text-sm text-slate-600">
-                Run directory: <span className="font-mono">{runResult.runDir}</span>
-              </p>
-            )}
             {runResult.error && (
               <div>
                 <h3 className="text-sm font-semibold text-red-600">Error</h3>

@@ -204,7 +204,6 @@ app.post('/run', async (req, res) => {
     report = await readRunReport(context.runDir);
 
     res.json({
-      runDir: context.runDir,
       stdout: result.stdout,
       stderr: result.stderr,
       report,
@@ -218,9 +217,17 @@ app.post('/run', async (req, res) => {
       error: err.message,
       stdout: err.stdout,
       stderr: err.stderr,
-      runDir: context?.runDir,
       report,
     });
+  } finally {
+    if (context?.runDir) {
+      try {
+        await fs.rm(context.runDir, { recursive: true, force: true });
+      } catch (cleanupError) {
+        // eslint-disable-next-line no-console
+        console.warn(`Failed to remove run directory ${context.runDir}:`, cleanupError);
+      }
+    }
   }
 });
 

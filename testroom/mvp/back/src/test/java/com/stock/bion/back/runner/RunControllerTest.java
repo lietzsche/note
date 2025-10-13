@@ -44,7 +44,6 @@ class RunControllerTest {
     void executeDelegatesToServiceAndReturnsResponse() throws Exception {
         RunResponse runResponse =
                 RunResponse.builder()
-                        .runDir("/tmp/run-123")
                         .stdout("Scenario passed")
                         .stderr("")
                         .build();
@@ -64,7 +63,6 @@ class RunControllerTest {
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.runDir").value("/tmp/run-123"))
                 .andExpect(jsonPath("$.stdout").value("Scenario passed"));
 
         verify(runService).execute(any(RunRequest.class));
