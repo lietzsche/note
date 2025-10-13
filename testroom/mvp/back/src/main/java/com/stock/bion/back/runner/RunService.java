@@ -1,0 +1,38 @@
+package com.stock.bion.back.runner;
+
+import java.time.Duration;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
+import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClient;
+
+@Service
+public class RunService {
+
+    private final WebClient webClient;
+    private final Duration timeout;
+
+    public RunService(
+            WebClient.Builder webClientBuilder,
+            @Value("${runner.url}") String runnerBaseUrl,
+            @Value("${runner.timeout:30s}") Duration timeout) {
+        this.webClient = webClientBuilder.baseUrl(runnerBaseUrl).build();
+        this.timeout = timeout.isZero() ? Duration.ofSeconds(30) : timeout;
+    }
+
+    public RunResponse execute(RunRequest request) {
+        try {
+            return webClient
+                    .post()
+                    .uri("/run")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(request)
+                    .retrieve()
+                    .bodyToMono(RunResponse.class)
+                    .timeout(timeout)
+                    .block(timeout.plusSeconds(5));
+        } catch (RuntimeException ex) {
+            throw new RunnerClientException("Failed to invoke runner service", ex);
+        }
+    }
+}

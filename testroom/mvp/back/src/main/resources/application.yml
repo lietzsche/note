@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: back
+  datasource:
+    url: jdbc:h2:mem:testdb
+  jpa:
+    hibernate:
+      ddl-auto: update
+  h2:
+    console:
+      enabled: true
+
+jwt:
+  secret: changeitchangeitchangeitchangeit
+
+runner:
+  url: ${RUNNER_URL:http://localhost:3000}
+  timeout: 30s
