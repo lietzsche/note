@@ -98,6 +98,33 @@ public class ServiceController {
         return toScenarioResponse(saved);
     }
 
+    @PutMapping("/{id}/scenarios/{scenarioId}")
+    public ScenarioResponse updateScenario(
+            @PathVariable Long id,
+            @PathVariable Long scenarioId,
+            @RequestBody @Valid ScenarioRequest request) {
+        Service svc = serviceRepository.findById(id).orElseThrow(() -> new ServiceNotFoundException(id));
+        Scenario scenario = scenarioRepository.findById(scenarioId)
+                .orElseThrow(() -> new com.stock.bion.back.scenario.ScenarioNotFoundException(scenarioId));
+        if (scenario.getService() == null || !scenario.getService().getId().equals(svc.getId())) {
+            throw new com.stock.bion.back.scenario.ScenarioNotFoundException(scenarioId);
+        }
+
+        scenario.setTitle(request.getTitle() == null || request.getTitle().isBlank()
+                ? scenario.getTitle()
+                : request.getTitle().trim());
+        scenario.setFeatures(request.getFeatures().stream()
+                .map(a -> new com.stock.bion.back.scenario.ScenarioAsset(a.getName(), a.getContent()))
+                .collect(java.util.stream.Collectors.toList()));
+        // Steps are managed at service-level; allow but overwrite to provided (often empty)
+        scenario.setSteps(request.getSteps().stream()
+                .map(a -> new com.stock.bion.back.scenario.ScenarioAsset(a.getName(), a.getContent()))
+                .collect(java.util.stream.Collectors.toList()));
+
+        Scenario saved = scenarioRepository.save(scenario);
+        return toScenarioResponse(saved);
+    }
+
     @PostMapping("/{id}/run")
     public ResponseEntity<RunResponse> runAllSteps(
             @PathVariable Long id,
