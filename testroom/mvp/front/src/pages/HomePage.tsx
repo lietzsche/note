@@ -11,9 +11,9 @@ function HomePage() {
         <Link to="/register" className="link">
           Register
         </Link>
-          <Link to="/scenarios" className="link">
-              Scenarios
-          </Link>
+          {/*<Link to="/scenarios" className="link">*/}
+          {/*    Scenarios*/}
+          {/*</Link>*/}
           <Link to="/services" className="link">
               Services
           </Link>
