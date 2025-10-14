@@ -104,3 +104,105 @@ Then('다음 저작도구들 확인', async function (table: DataTable) {
 });
 
 ```
+
+
+
+## aiclass 진입
+### aiclass 진입 확인
+#### example.feature
+```
+Feature: aiclass 진입
+
+  Scenario: aiclass 진입 확인
+    Given 초등학교 로그인 후 메인 페이지 진입
+    When aiclass 이미지 클릭
+    Then aiclass의 다음 매뉴들 확인
+      | 에이아이 학습지     |
+      | 퀴즈온       |
+      | 모둠활동 보드 |
+      | 리포트       |
+      | 마이 클래스   |
+      | 클래스 관리   |
+```
+
+### example.steps.ts
+```
+import { Given, When, Then, DataTable } from '@cucumber/cucumber';
+import {expect, Page} from "@playwright/test";
+import {Locator} from "playwright-core";
+
+Given('초등학교 로그인 후 메인 페이지 진입', async function () {
+  await this.page.goto("https://e.m-teacher.co.kr")
+
+  await this.page.waitForLoadState('domcontentloaded', { timeout: 30_000 });
+  await this.page.waitForLoadState('networkidle', { timeout: 30_000 });
+
+  await this.page.locator("button#closePop").click().catch(() => {});
+
+  await this.page.waitForLoadState('domcontentloaded', { timeout: 30_000 });
+  await this.page.waitForLoadState('networkidle', { timeout: 30_000 });
+
+  await this.page.locator("#user-id").fill("");
+  await this.page.locator("#user-pw").fill("");
+  await this.page.locator('#btn-login').click()
+  await this.page.locator("button#closePop").click().catch(() => {});
+});
+
+const ifPopupUpdateTab = async function (popup: Page) {
+    await popup.waitForLoadState('domcontentloaded', { timeout: 15_000 });
+    await popup.bringToFront();
+
+    const oldPage = this.page;
+    const hasOpener = !!popup.opener();     // ← 여기서 판단
+    this.page = popup;
+
+    // noopener 인 경우에만 기존 탭 닫기
+    if (!hasOpener && oldPage !== popup && !oldPage.isClosed()) {
+        await oldPage.close();
+    }
+}
+
+// 팝업 시 팝업되는 페이지로 기존 페이지를 갈아끼우고, 기존 페이지 끄기
+const ifPopupUpdateNextTab = async function (btn: Locator) {
+    const ctx = this.page.context();
+    const pagesBefore = ctx.pages().length;
+
+    let [nextTab] = await Promise.all([
+        Promise.race([
+            this.page.waitForEvent('popup', { timeout: 30_000 }),
+            ctx.waitForEvent('page', { timeout: 30_000 }),
+        ]).catch(() => null),
+        btn.click(),
+    ]);
+
+    if (!nextTab && ctx.pages().length > pagesBefore) {
+        const newPages = ctx.pages().slice(pagesBefore);
+        nextTab = newPages[newPages.length - 1];
+    }
+
+    if (nextTab && nextTab !== this.page) {
+        await ifPopupUpdateTab.call(this, nextTab);
+    }
+}
+
+When("aiclass 이미지 클릭", async function () {
+    const btn = this.page.locator("a[href='https://mh-aiclass.m-teacher.co.kr/#/teacher/elem']");
+    await ifPopupUpdateNextTab.call(this, btn)
+});
+
+async function waitForPageSettled(page: Page, timeout: number = 30_000) {
+    await page.waitForLoadState('domcontentloaded', { timeout });
+    await page.waitForLoadState('networkidle', { timeout });
+}
+
+Then('aiclass의 다음 매뉴들 확인', async function (table: DataTable) {
+    await waitForPageSettled(this.page, 30_000)
+    const names = table.raw().flat().filter(Boolean);
+    for (const name of names) {
+        const el = this.page.locator('.title', { hasText: name }).first();
+        await expect(el).toBeVisible({ timeout: 30_000 });
+    }
+});
+
+
+```
