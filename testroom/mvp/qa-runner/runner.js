@@ -118,7 +118,18 @@ function runCucumber(opts) {
     );
   }
 
-  const args = ['--config', 'cucumber.js', 'features'];
+  const args = ['--config', 'cucumber.js'];
+
+  // 최소 변경: 환경변수로 retry 옵션 주입
+  const retry = Number(process.env.CUCUMBER_RETRY || '1');
+  if (!Number.isNaN(retry) && retry > 0) {
+    args.push('--retry', String(retry));
+  }
+  const retryTagFilter = process.env.CUCUMBER_RETRY_TAG_FILTER;
+  if (retryTagFilter) {
+    args.push('--retryTagFilter', String(retryTagFilter));
+  }
+  args.push('features');
 
   const env = {
     ...process.env,
