@@ -255,6 +255,7 @@ function ScenarioEditor({ basePath = '/api/scenarios' }: ScenarioEditorProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [isRunning, setIsRunning] = useState(false)
+  const [isRunningService, setIsRunningService] = useState(false)
 
   const [feedback, setFeedback] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -340,6 +341,16 @@ function ScenarioEditor({ basePath = '/api/scenarios' }: ScenarioEditorProps) {
     [normalizedStepsName]
   )
 
+  const serviceRunPath = useMemo(() => {
+    // If this editor is scoped to a service (e.g., /api/services/{id}/scenarios),
+    // derive the corresponding run endpoint: /api/services/{id}/run
+    if (!basePath) return null
+    const match = basePath.match(/^\/api\/services\/(\d+)\/scenarios$/)
+    if (!match) return null
+    const serviceId = match[1]
+    return `/api/services/${serviceId}/run`
+  }, [basePath])
+
   const scenarioPayload = useMemo<ScenarioPayload>(
     () => ({
       title: title.trim() || DEFAULT_TITLE,
@@ -349,14 +360,10 @@ function ScenarioEditor({ basePath = '/api/scenarios' }: ScenarioEditorProps) {
           content: featureContent,
         },
       ],
-      steps: [
-        {
-          name: normalizedStepsName,
-          content: stepsContent,
-        },
-      ],
+      // Steps are managed in the service Step Library; scenarios don't carry steps.
+      steps: [],
     }),
-    [title, normalizedFeatureName, featureContent, normalizedStepsName, stepsContent]
+    [title, normalizedFeatureName, featureContent]
   )
 
   const runPayload = useMemo(
@@ -366,6 +373,8 @@ function ScenarioEditor({ basePath = '/api/scenarios' }: ScenarioEditorProps) {
     }),
     [scenarioPayload]
   )
+
+  
 
   const fetchJson = useCallback(
     async <T,>(path: string, init?: RequestInit): Promise<T> => {
@@ -649,10 +658,15 @@ interface ImportMeta {
     setRunResult(null)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/run`, {
+      // In service context, run current feature against the Service Step Library via backend
+      const url = serviceRunPath ? `${API_BASE_URL}${serviceRunPath}` : `${API_BASE_URL}/api/run`
+      const body = serviceRunPath
+        ? JSON.stringify({ features: scenarioPayload.features })
+        : JSON.stringify(runPayload)
+      const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(runPayload),
+        body,
       })
 
       let payload: RunResponse | null = null
@@ -682,7 +696,9 @@ interface ImportMeta {
     } finally {
       setIsRunning(false)
     }
-  }, [runPayload])
+  }, [runPayload, serviceRunPath, scenarioPayload.features])
+
+  // Removed: redundant "Run Service (all steps)" button/handler. Use Run Scenario instead.
 
   return (
     <>
@@ -737,7 +753,7 @@ interface ImportMeta {
           </p>
         </header>
 
-        <section className="grid gap-6 rounded border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-[1fr_1fr] min-w-0">
+        <section className="grid gap-6 rounded border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-1 min-w-0">
           <div className="flex flex-col gap-3 min-w-0">
             <label className="flex flex-col gap-2">
               <span className="text-sm font-medium text-slate-700">Scenario title</span>
@@ -775,36 +791,8 @@ interface ImportMeta {
               />
             </div>
           </div>
-
-          <div className="flex flex-col gap-3 min-w-0">
-            <label className="flex flex-col gap-2">
-              <span className="text-sm font-medium text-slate-700">Step file</span>
-              <input
-                className="rounded border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-                value={stepsName}
-                onChange={(event) => setStepsName(event.target.value)}
-                placeholder={DEFAULT_STEPS_NAME}
-              />
-            </label>
-            <div className="overflow-hidden rounded border border-slate-200 shadow-inner">
-              <Editor
-                height="400px"
-                path={stepsEditorPath}
-                language="typescript"
-                value={stepsContent}
-                onChange={(value) => setStepsContent(value ?? '')}
-                options={{
-                  minimap: { enabled: false },
-                  fontSize: 14,
-                  wordWrap: 'on',
-                  lineNumbers: 'on',
-                  scrollBeyondLastLine: false,
-                  suggest: {
-                    showSnippets: true,
-                  },
-                }}
-              />
-            </div>
+          <div className="flex items-center justify-center text-sm text-slate-500">
+            Steps are managed in the service Step Library.
           </div>
         </section>
 
@@ -825,6 +813,44 @@ interface ImportMeta {
           >
             {isRunning ? 'Running…' : 'Run Scenario'}
           </button>
+          
+          {serviceRunPath && (
+            <button
+              type="button"
+              onClick={async () => {
+                // Run all features under the service with the full Step Library
+                setIsRunningService(true)
+                setError(null)
+                setFeedback(null)
+                setRunResult(null)
+                try {
+                  const response = await fetch(`${API_BASE_URL}${serviceRunPath}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(null), // no features -> backend gathers all features
+                  })
+                  let payload: RunResponse | null = null
+                  try { payload = (await response.json()) as RunResponse } catch { payload = null }
+                  if (!response.ok) {
+                    setError(payload?.error || `Failed to execute the service run. Server responded with status ${response.status}.`)
+                    if (payload) setRunResult(payload)
+                    return
+                  }
+                  setRunResult(payload ?? { stdout: 'Service (all features) run completed.' })
+                  setFeedback('Service executed with all features.')
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : 'Failed to execute service run.'
+                  setError(message)
+                } finally {
+                  setIsRunningService(false)
+                }
+              }}
+              disabled={isRunningService || isSaving}
+              className="rounded bg-indigo-700 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+            >
+              Run Service (all features)
+            </button>
+          )}
           <button
             type="button"
             onClick={handleDelete}
