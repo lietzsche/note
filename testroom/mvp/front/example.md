@@ -115,6 +115,7 @@ Feature: aiclass 진입
 
   Scenario: aiclass 진입 확인
     Given 초등학교 로그인 후 메인 페이지 진입
+    And 퀵 매뉴 닫기
     When aiclass 이미지 클릭
     Then aiclass의 다음 매뉴들 확인
       | 에이아이 학습지     |
@@ -123,6 +124,7 @@ Feature: aiclass 진입
       | 리포트       |
       | 마이 클래스   |
       | 클래스 관리   |
+
 ```
 
 ### example.steps.ts
@@ -147,6 +149,10 @@ Given('초등학교 로그인 후 메인 페이지 진입', async function () {
   await this.page.locator('#btn-login').click()
   await this.page.locator("button#closePop").click().catch(() => {});
 });
+
+Given("퀵 매뉴 닫기", async function () {
+    await this.page.locator(".quick_menu.open button.toggle-button.quick_btn").click();
+})
 
 const ifPopupUpdateTab = async function (popup: Page) {
     await popup.waitForLoadState('domcontentloaded', { timeout: 15_000 });
@@ -203,6 +209,7 @@ Then('aiclass의 다음 매뉴들 확인', async function (table: DataTable) {
         await expect(el).toBeVisible({ timeout: 30_000 });
     }
 });
+
 
 
 ```
