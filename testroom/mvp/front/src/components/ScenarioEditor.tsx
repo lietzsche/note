@@ -34,6 +34,10 @@ type TypeDefinitionResponse = {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
+type ScenarioEditorProps = {
+  basePath?: string
+}
+
 const DEFAULT_TITLE = 'New Scenario'
 const DEFAULT_FEATURE_NAME = 'example.feature'
 const DEFAULT_STEPS_NAME = 'example.steps.ts'
@@ -236,7 +240,7 @@ type FailureDetails = {
   messages: string[]
 }
 
-function ScenarioEditor() {
+function ScenarioEditor({ basePath = '/api/scenarios' }: ScenarioEditorProps) {
   const monaco = useMonaco()
   const typeLibrariesLoadedRef = useRef(false)
 
@@ -528,7 +532,7 @@ interface ImportMeta {
     setError(null)
 
     try {
-      const data = await fetchJson<ScenarioRecord[]>('/api/scenarios')
+      const data = await fetchJson<ScenarioRecord[]>(basePath)
       setScenarios(data)
       if (data.length > 0) {
         applyScenario(data[0])
@@ -542,7 +546,7 @@ interface ImportMeta {
     } finally {
       setIsLoading(false)
     }
-  }, [applyScenario, fetchJson, resetEditor])
+  }, [applyScenario, fetchJson, resetEditor, basePath])
 
   useEffect(() => {
     void loadScenarios()
@@ -585,7 +589,7 @@ interface ImportMeta {
 
     try {
       if (selectedScenarioId === null) {
-        const created = await fetchJson<ScenarioRecord>('/api/scenarios', {
+        const created = await fetchJson<ScenarioRecord>(basePath, {
           method: 'POST',
           body: JSON.stringify(scenarioPayload),
         })
@@ -593,7 +597,7 @@ interface ImportMeta {
         applyScenario(created)
         setFeedback('Scenario saved.')
       } else {
-        const updated = await fetchJson<ScenarioRecord>(`/api/scenarios/${selectedScenarioId}`, {
+        const updated = await fetchJson<ScenarioRecord>(`${basePath}/${selectedScenarioId}`, {
           method: 'PUT',
           body: JSON.stringify(scenarioPayload),
         })
@@ -624,7 +628,7 @@ interface ImportMeta {
     setFeedback(null)
 
     try {
-      await fetchJson<void>(`/api/scenarios/${selectedScenarioId}`, {
+      await fetchJson<void>(`${basePath}/${selectedScenarioId}`, {
         method: 'DELETE',
       })
       setScenarios((current) => current.filter((item) => item.id !== selectedScenarioId))
@@ -636,7 +640,7 @@ interface ImportMeta {
         err instanceof Error ? err.message : 'Failed to delete the scenario. Please try again.'
       setError(message)
     }
-  }, [fetchJson, resetEditor, selectedScenarioId])
+  }, [fetchJson, resetEditor, selectedScenarioId, basePath])
 
   const handleRun = useCallback(async () => {
     setIsRunning(true)

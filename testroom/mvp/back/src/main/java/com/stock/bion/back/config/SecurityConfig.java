@@ -35,6 +35,7 @@ public class SecurityConfig {
                         "/api/run",
                         "/api/results",
                         "/api/scenarios/**",
+                        "/api/services/**",
                         "/api/types/**")
                 .permitAll()
                 .anyRequest().authenticated())

@@ -10,6 +10,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OrderColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -49,6 +50,10 @@ public class Scenario {
     @OrderColumn(name = "position")
     private List<ScenarioAsset> steps = new ArrayList<>();
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "service_id")
+    private com.stock.bion.back.service.Service service;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -75,6 +80,10 @@ public class Scenario {
             this.steps.clear();
         }
         this.steps.addAll(steps);
+    }
+
+    public void setService(com.stock.bion.back.service.Service service) {
+        this.service = service;
     }
 
     @PrePersist

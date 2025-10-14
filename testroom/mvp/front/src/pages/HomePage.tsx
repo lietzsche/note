@@ -14,6 +14,9 @@ function HomePage() {
           <Link to="/scenarios" className="link">
               Scenarios
           </Link>
+          <Link to="/services" className="link">
+              Services
+          </Link>
       </div>
     </div>
   )
