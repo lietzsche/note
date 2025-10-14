@@ -1,6 +1,5 @@
-## makex 진입
 ### 나만의 makex 저작도구 진입 및 동작 확인
-#### example.feature
+#### makex.feature
 ```
 Feature: makex 진입
 
@@ -20,9 +19,8 @@ Feature: makex 진입
       | 오디오           |
 ```
 
-## aiclass 진입
 ### aiclass 진입 확인
-#### example.feature
+#### aiclass.feature
 ```
 Feature: aiclass 진입
 
@@ -38,6 +36,21 @@ Feature: aiclass 진입
       | 마이 클래스   |
       | 클래스 관리   |
 
+```
+
+### digitalmap 진입 확인
+#### digitalmap.feature
+```
+Feature: 디지털 지도 진입
+
+  Scenario: 디지털 지도 진입 확인
+    Given 초등학교 로그인 후 메인 페이지 진입
+    And 퀵 매뉴 닫기
+    When 배너로 디지털 지도 진입
+    Then 디지털 지도의 다음 매뉴들 확인
+      | 디지털 지도      |
+      | 대한민국        |
+      | 세계            |
 ```
 
 ### example.steps.ts
@@ -142,6 +155,22 @@ Then('aiclass의 다음 매뉴들 확인', async function (table: DataTable) {
     }
 });
 
+When("배너로 디지털 지도 진입", async function () {
+    const link = await this.page.locator('a:has(strong)', {hasText: /디지털\s*지도/})
 
+    await expect(link).toBeVisible({ timeout: 15_000 });
+    await ifPopupUpdateNextTab.call(this, link);
+});
+
+Then("디지털 지도의 다음 매뉴들 확인", async function (table: DataTable) {
+    const names = table.raw().flat().filter(Boolean);
+    await expect(
+        this.page.locator('h2', {hasText: names.shift()})
+    ).toBeVisible()
+    for (const name of names) {
+        const el = this.page.locator('strong.title', { hasText: name }).first();
+        await expect(el).toBeVisible();
+    }
+});
 
 ```
