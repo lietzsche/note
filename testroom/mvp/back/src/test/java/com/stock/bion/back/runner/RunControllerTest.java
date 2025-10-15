@@ -8,18 +8,19 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.stock.bion.back.result.TestResultRequest;
+import com.stock.bion.back.result.TestResultService;
+import com.stock.bion.back.security.JwtAuthenticationFilter;
+import com.stock.bion.back.security.JwtTokenProvider;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
-
-import com.stock.bion.back.security.JwtAuthenticationFilter;
-import com.stock.bion.back.security.JwtTokenProvider;
 
 @WebMvcTest(RunController.class)
 @AutoConfigureMockMvc(addFilters = false)
@@ -35,6 +36,9 @@ class RunControllerTest {
     private RunService runService;
 
     @MockitoBean
+    private TestResultService testResultService;
+
+    @MockitoBean
     private JwtAuthenticationFilter jwtAuthenticationFilter;
 
     @MockitoBean
@@ -47,7 +51,7 @@ class RunControllerTest {
                         .stdout("Scenario passed")
                         .stderr("")
                         .build();
-        when(runService.execute(any(RunRequest.class))).thenReturn(runResponse);
+        when(runService.execute(any(RunRequest.class))).thenReturn(ResponseEntity.ok(runResponse));
 
         RunRequest request =
                 RunRequest.builder()
@@ -66,5 +70,6 @@ class RunControllerTest {
                 .andExpect(jsonPath("$.stdout").value("Scenario passed"));
 
         verify(runService).execute(any(RunRequest.class));
+        verify(testResultService).saveResult(any(TestResultRequest.class));
     }
 }

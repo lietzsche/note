@@ -13,6 +13,7 @@ import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.reactive.function.client.WebClient;
 
 class RunServiceTest {
@@ -64,9 +65,11 @@ class RunServiceTest {
                                                 .build()))
                         .build();
 
-        RunResponse response = runService.execute(request);
+        ResponseEntity<RunResponse> response = runService.execute(request);
 
-        assertThat(response.getStdout()).contains("Scenario passed");
+        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getStdout()).contains("Scenario passed");
 
         RecordedRequest recordedRequest = mockWebServer.takeRequest();
         assertThat(recordedRequest.getMethod()).isEqualTo("POST");

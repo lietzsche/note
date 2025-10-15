@@ -1,20 +1,29 @@
 package com.stock.bion.back.service;
 
+import com.stock.bion.back.result.TestResultRequest;
+import com.stock.bion.back.result.TestResultService;
+import com.stock.bion.back.runner.RunRequest;
+import com.stock.bion.back.runner.RunResponse;
+import com.stock.bion.back.runner.RunScope;
+import com.stock.bion.back.runner.RunService;
+import com.stock.bion.back.runner.RunStatusResolver;
 import com.stock.bion.back.scenario.Scenario;
 import com.stock.bion.back.scenario.ScenarioRepository;
 import com.stock.bion.back.scenario.ScenarioRequest;
 import com.stock.bion.back.scenario.ScenarioResponse;
-import com.stock.bion.back.runner.RunRequest;
-import com.stock.bion.back.runner.RunResponse;
-import com.stock.bion.back.runner.RunService;
 import com.stock.bion.back.step.ServiceStep;
 import com.stock.bion.back.step.ServiceStepRepository;
 import com.stock.bion.back.step.ServiceStepRequest;
 import com.stock.bion.back.step.ServiceStepResponse;
 import jakarta.validation.Valid;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -25,12 +34,14 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/services")
 @Validated
 @RequiredArgsConstructor
+@Slf4j
 public class ServiceController {
 
     private final ServiceRepository serviceRepository;
     private final ScenarioRepository scenarioRepository;
     private final ServiceStepRepository stepRepository;
     private final RunService runService;
+    private final TestResultService testResultService;
 
     @GetMapping
     public List<ServiceResponse> findAll() {
@@ -161,13 +172,16 @@ public class ServiceController {
         // - If request contains features -> use exactly those (single scenario run).
         // - Else -> use all features from this service (run all scenarios).
         java.util.List<RunRequest.Asset> features;
+        boolean fullServiceRun;
         if (request != null && request.getFeatures() != null && !request.getFeatures().isEmpty()) {
             features = request.getFeatures();
+            fullServiceRun = false;
         } else {
             features = scenarios.stream()
                     .flatMap(sc -> sc.getFeatures().stream())
                     .map(a -> RunRequest.Asset.builder().name(a.getName()).content(a.getContent()).build())
                     .toList();
+            fullServiceRun = true;
         }
 
         RunRequest merged = RunRequest.builder()
@@ -175,7 +189,38 @@ public class ServiceController {
                 .steps(allSteps)
                 .build();
 
-        return runService.execute(merged);
+        Instant startedAt = Instant.now();
+        ResponseEntity<RunResponse> response = runService.execute(merged);
+        RunResponse body = response.getBody();
+        long durationMs = Duration.between(startedAt, Instant.now()).toMillis();
+
+        try {
+            RunRequest.Metadata metadata = request != null ? request.getMetadata() : null;
+            Long scenarioId = metadata != null ? metadata.getScenarioId() : null;
+            String scenarioTitle = resolveScenarioTitle(metadata, scenarios, request, fullServiceRun);
+
+            TestResultRequest.TestResultRequestBuilder builder = TestResultRequest.builder()
+                    .scope(fullServiceRun ? RunScope.SERVICE : RunScope.SCENARIO)
+                    .serviceId(svc.getId())
+                    .serviceName(svc.getName())
+                    .scenarioId(scenarioId)
+                    .scenarioTitle(scenarioTitle)
+                    .serviceFullRun(fullServiceRun)
+                    .status(RunStatusResolver.resolveStatus(body))
+                    .durationMs(durationMs)
+                    .runId(UUID.randomUUID().toString())
+                    .error(body != null ? body.getError() : null)
+                    .httpStatus(response.getStatusCodeValue())
+                    .stdout(body != null ? body.getStdout() : null)
+                    .stderr(body != null ? body.getStderr() : null)
+                    .report(body != null && body.getReport() != null ? body.getReport().toString() : null);
+
+            testResultService.saveResult(builder.build());
+        } catch (Exception ex) {
+            log.warn("Failed to persist service run result for service {}", svc.getId(), ex);
+        }
+
+        return response;
     }
 
     // Step Library CRUD
@@ -216,6 +261,30 @@ public class ServiceController {
             throw new IllegalArgumentException("Step not found: " + stepId);
         }
         stepRepository.deleteById(stepId);
+    }
+
+    private String resolveScenarioTitle(
+            RunRequest.Metadata metadata,
+            List<Scenario> scenarios,
+            ServiceRunRequest request,
+            boolean fullServiceRun) {
+        if (fullServiceRun) {
+            return null;
+        }
+        if (metadata != null && metadata.getScenarioTitle() != null && !metadata.getScenarioTitle().isBlank()) {
+            return metadata.getScenarioTitle();
+        }
+        if (metadata != null && metadata.getScenarioId() != null) {
+            Optional<Scenario> match =
+                    scenarios.stream().filter(sc -> sc.getId().equals(metadata.getScenarioId())).findFirst();
+            if (match.isPresent()) {
+                return match.get().getTitle();
+            }
+        }
+        if (request != null && request.getFeatures() != null && !request.getFeatures().isEmpty()) {
+            return request.getFeatures().get(0).getName();
+        }
+        return null;
     }
 
     private ServiceStepResponse toStepResponse(ServiceStep step) {

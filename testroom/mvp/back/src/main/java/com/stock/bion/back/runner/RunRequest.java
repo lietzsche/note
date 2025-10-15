@@ -25,6 +25,9 @@ public class RunRequest {
     @Valid
     private List<Asset> steps = new ArrayList<>();
 
+    @Valid
+    private Metadata metadata;
+
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
@@ -35,5 +38,18 @@ public class RunRequest {
 
         @NotBlank
         private String content;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class Metadata {
+
+        private RunScope scope;
+        private Long serviceId;
+        private Long scenarioId;
+        private String scenarioTitle;
+        private Boolean serviceFullRun;
     }
 }

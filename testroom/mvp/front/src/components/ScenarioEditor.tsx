@@ -28,6 +28,73 @@ type RunResponse = {
   error?: string
 }
 
+type RunScope = 'SCENARIO' | 'SERVICE'
+
+type RunMetadata = {
+  scope: RunScope
+  serviceId?: number
+  scenarioId?: number
+  scenarioTitle?: string
+  serviceFullRun?: boolean
+}
+
+type RunHistoryEntry = {
+  id?: number
+  scope: RunScope
+  serviceId?: number | null
+  serviceName?: string | null
+  scenarioId?: number | null
+  scenarioTitle?: string | null
+  serviceFullRun?: boolean | null
+  status?: string | null
+  durationMs?: number | null
+  reportUrl?: string | null
+  runId: string
+  error?: string | null
+  httpStatus?: number | null
+  stdout?: string | null
+  stderr?: string | null
+  report?: string | null
+  createdAt: string
+}
+
+const STATUS_CLASS_MAP: Record<string, string> = {
+  PASSED: 'bg-emerald-100 text-emerald-700 border border-emerald-300',
+  COMPLETED: 'bg-emerald-100 text-emerald-700 border border-emerald-300',
+  FAILED: 'bg-rose-100 text-rose-700 border border-rose-300',
+  ERROR: 'bg-rose-100 text-rose-700 border border-rose-300',
+  UNDEFINED: 'bg-amber-100 text-amber-700 border border-amber-300',
+}
+
+function formatDateTime(value: string | undefined | null) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  return date.toLocaleString()
+}
+
+function formatDuration(durationMs: number | undefined | null) {
+  if (durationMs === undefined || durationMs === null) return '-'
+  if (durationMs < 1000) return `${durationMs} ms`
+  const seconds = durationMs / 1000
+  if (seconds < 60) return `${seconds.toFixed(1)} s`
+  const minutes = seconds / 60
+  return `${minutes.toFixed(1)} min`
+}
+
+function resolveStatusClasses(status: string | undefined | null) {
+  if (!status) return 'bg-slate-100 text-slate-600 border border-slate-300'
+  const key = status.toUpperCase()
+  return STATUS_CLASS_MAP[key] ?? 'bg-slate-100 text-slate-600 border border-slate-300'
+}
+
+function normalizeStatusLabel(status: string | undefined | null) {
+  if (!status) return 'UNKNOWN'
+  return status.toUpperCase()
+}
+
 type TypeDefinitionResponse = {
   files: Record<string, string>
 }
@@ -40,27 +107,11 @@ type ScenarioEditorProps = {
 
 const DEFAULT_TITLE = 'New Scenario'
 const DEFAULT_FEATURE_NAME = 'example.feature'
-const DEFAULT_STEPS_NAME = 'example.steps.ts'
 const DEFAULT_FEATURE_CONTENT = `Feature: Example
   Scenario: Visit Playwright
     Given I open playwright homepage
     When I interact with the page
     Then I should see the expected result`
-
-const DEFAULT_STEPS_CONTENT = `import { Given, When, Then } from '@cucumber/cucumber';
-
-Given('I open playwright homepage', async function () {
-  await this.page.goto('https://playwright.dev');
-});
-
-When('I interact with the page', async function () {
-  // TODO: implement step
-});
-
-Then('I should see the expected result', async function () {
-  // TODO: add assertions
-});
-`
 
 function extractFailureDetails(report: CucumberReport | undefined | null): FailureDetails {
   const details: FailureDetails = { attachments: [], messages: [] }
@@ -248,9 +299,7 @@ function ScenarioEditor({ basePath = '/api/scenarios' }: ScenarioEditorProps) {
   const [selectedScenarioId, setSelectedScenarioId] = useState<number | null>(null)
   const [title, setTitle] = useState(DEFAULT_TITLE)
   const [featureName, setFeatureName] = useState(DEFAULT_FEATURE_NAME)
-  const [stepsName, setStepsName] = useState(DEFAULT_STEPS_NAME)
   const [featureContent, setFeatureContent] = useState(DEFAULT_FEATURE_CONTENT)
-  const [stepsContent, setStepsContent] = useState(DEFAULT_STEPS_CONTENT)
 
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -261,6 +310,11 @@ function ScenarioEditor({ basePath = '/api/scenarios' }: ScenarioEditorProps) {
   const [error, setError] = useState<string | null>(null)
   const [runResult, setRunResult] = useState<RunResponse | null>(null)
   const [selectedScreenshot, setSelectedScreenshot] = useState<FailureAttachment | null>(null)
+
+  const [runHistory, setRunHistory] = useState<RunHistoryEntry[]>([])
+  const [isRunHistoryLoading, setIsRunHistoryLoading] = useState(false)
+  const [runHistoryError, setRunHistoryError] = useState<string | null>(null)
+  const [activePanel, setActivePanel] = useState<'editor' | 'history'>('editor')
 
   useEffect(() => {
     if (!monaco) {
@@ -326,19 +380,9 @@ function ScenarioEditor({ basePath = '/api/scenarios' }: ScenarioEditorProps) {
     [featureName]
   )
 
-  const normalizedStepsName = useMemo(
-    () => stepsName.trim() || DEFAULT_STEPS_NAME,
-    [stepsName]
-  )
-
   const featureEditorPath = useMemo(
     () => `file:///scenario/${normalizedFeatureName}`,
     [normalizedFeatureName]
-  )
-
-  const stepsEditorPath = useMemo(
-    () => `file:///scenario/${normalizedStepsName}`,
-    [normalizedStepsName]
   )
 
   const serviceRunPath = useMemo(() => {
@@ -351,9 +395,18 @@ function ScenarioEditor({ basePath = '/api/scenarios' }: ScenarioEditorProps) {
     return `/api/services/${serviceId}/run`
   }, [basePath])
 
+  const serviceId = useMemo(() => {
+    if (!serviceRunPath) return undefined
+    const match = serviceRunPath.match(/\/api\/services\/(\d+)\/run$/)
+    if (!match) return undefined
+    return Number.parseInt(match[1], 10)
+  }, [serviceRunPath])
+
+  const resolvedTitle = useMemo(() => (title.trim() ? title.trim() : DEFAULT_TITLE), [title])
+
   const scenarioPayload = useMemo<ScenarioPayload>(
     () => ({
-      title: title.trim() || DEFAULT_TITLE,
+      title: resolvedTitle,
       features: [
         {
           name: normalizedFeatureName,
@@ -363,15 +416,146 @@ function ScenarioEditor({ basePath = '/api/scenarios' }: ScenarioEditorProps) {
       // Steps are managed in the service Step Library; scenarios don't carry steps.
       steps: [],
     }),
-    [title, normalizedFeatureName, featureContent]
+    [resolvedTitle, normalizedFeatureName, featureContent]
+  )
+
+  const scenarioRunMetadata = useMemo<RunMetadata>(
+    () => ({
+      scope: 'SCENARIO',
+      serviceId,
+      scenarioId: selectedScenarioId ?? undefined,
+      scenarioTitle: resolvedTitle,
+      serviceFullRun: false,
+    }),
+    [serviceId, selectedScenarioId, resolvedTitle]
   )
 
   const runPayload = useMemo(
     () => ({
       features: scenarioPayload.features,
       steps: scenarioPayload.steps,
+      metadata: scenarioRunMetadata,
     }),
-    [scenarioPayload]
+    [scenarioPayload, scenarioRunMetadata]
+  )
+
+  const scenarioHistory = useMemo(() => {
+    const filtered = runHistory.filter((entry) => {
+      if (entry.scope !== 'SCENARIO') return false
+      const entryServiceId = entry.serviceId ?? undefined
+      if (serviceId !== undefined) {
+        if (entryServiceId !== undefined && entryServiceId !== null && entryServiceId !== serviceId) {
+          return false
+        }
+        if (selectedScenarioId !== null && entry.scenarioId !== undefined && entry.scenarioId !== null) {
+          return entry.scenarioId === selectedScenarioId
+        }
+        if (entry.scenarioTitle && entry.scenarioTitle === resolvedTitle) {
+          return true
+        }
+        return entryServiceId === serviceId || entryServiceId === undefined || entryServiceId === null
+      }
+
+      if (selectedScenarioId !== null && entry.scenarioId !== undefined && entry.scenarioId !== null) {
+        return entry.scenarioId === selectedScenarioId
+      }
+
+      if (entry.scenarioTitle && entry.scenarioTitle === resolvedTitle) {
+        return true
+      }
+
+      return true
+    })
+    return filtered.slice(0, 20)
+  }, [runHistory, serviceId, selectedScenarioId, resolvedTitle])
+
+  const serviceHistory = useMemo(() => {
+    if (serviceId === undefined) return []
+    const filtered = runHistory.filter(
+      (entry) =>
+        entry.scope === 'SERVICE' &&
+        entry.serviceId !== undefined &&
+        entry.serviceId !== null &&
+        entry.serviceId === serviceId
+    )
+    return filtered.slice(0, 20)
+  }, [runHistory, serviceId])
+
+  const panelButtonClass = (panel: 'editor' | 'history') =>
+    `rounded px-3 py-2 text-sm font-semibold ${
+      activePanel === panel
+        ? 'bg-slate-900 text-white'
+        : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+    }`
+
+  const HistoryList = ({
+    title,
+    items,
+  }: {
+    title: string
+    items: RunHistoryEntry[]
+  }) => (
+    <div className="rounded border border-slate-200 bg-slate-50 p-3 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-slate-700">{title}</h3>
+        <span className="text-xs text-slate-500">{items.length} run{items.length === 1 ? '' : 's'}</span>
+      </div>
+      {items.length === 0 ? (
+        <p className="mt-2 text-xs text-slate-500">No runs recorded yet.</p>
+      ) : (
+        <ul className="mt-3 space-y-2">
+          {items.map((entry) => (
+            <li
+              key={entry.id ?? entry.runId}
+              className="rounded border border-slate-200 bg-white p-3"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">
+                    {entry.scenarioTitle || entry.serviceName || entry.scope}
+                  </p>
+                  <p className="text-xs text-slate-500">{formatDateTime(entry.createdAt)}</p>
+                </div>
+                <span
+                  className={`rounded px-2 py-0.5 text-xs font-semibold ${resolveStatusClasses(entry.status)}`}
+                >
+                  {normalizeStatusLabel(entry.status)}
+                </span>
+              </div>
+              <div className="mt-2 grid gap-2 text-xs text-slate-600 sm:grid-cols-3">
+                <span>Duration: {formatDuration(entry.durationMs)}</span>
+                <span>HTTP: {entry.httpStatus ?? '-'}</span>
+                <span className="sm:text-right">
+                  Run ID:{' '}
+                  <span className="font-mono text-[11px] text-slate-700">{entry.runId}</span>
+                </span>
+              </div>
+              {entry.error && (
+                <p className="mt-2 text-xs text-rose-600">
+                  Error: <span className="font-mono text-[11px]">{entry.error}</span>
+                </p>
+              )}
+              {entry.stdout && (
+                <details className="mt-2 text-xs">
+                  <summary className="cursor-pointer text-slate-600">Show stdout</summary>
+                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded border border-slate-200 bg-slate-50 p-2 text-[11px] text-slate-800">
+                    {entry.stdout}
+                  </pre>
+                </details>
+              )}
+              {entry.stderr && (
+                <details className="mt-2 text-xs">
+                  <summary className="cursor-pointer text-slate-600">Show stderr</summary>
+                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded border border-slate-200 bg-slate-50 p-2 text-[11px] text-slate-800">
+                    {entry.stderr}
+                  </pre>
+                </details>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 
   
@@ -396,6 +580,31 @@ function ScenarioEditor({ basePath = '/api/scenarios' }: ScenarioEditorProps) {
     },
     []
   )
+
+  const loadRunHistory = useCallback(async () => {
+    setIsRunHistoryLoading(true)
+    setRunHistoryError(null)
+    try {
+      const data = await fetchJson<RunHistoryEntry[]>('/api/results')
+      setRunHistory(Array.isArray(data) ? data : [])
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to load run history. Please try again.'
+      setRunHistoryError(message)
+    } finally {
+      setIsRunHistoryLoading(false)
+    }
+  }, [fetchJson])
+
+  useEffect(() => {
+    void loadRunHistory()
+  }, [loadRunHistory])
+
+  useEffect(() => {
+    if (activePanel === 'history') {
+      void loadRunHistory()
+    }
+  }, [activePanel, loadRunHistory])
 
   useEffect(() => {
     if (!monaco || typeLibrariesLoadedRef.current) {
@@ -525,8 +734,6 @@ interface ImportMeta {
     setTitle(scenario.title ?? DEFAULT_TITLE)
     setFeatureName(scenario.features[0]?.name ?? DEFAULT_FEATURE_NAME)
     setFeatureContent(scenario.features[0]?.content ?? DEFAULT_FEATURE_CONTENT)
-    setStepsName(scenario.steps[0]?.name ?? DEFAULT_STEPS_NAME)
-    setStepsContent(scenario.steps[0]?.content ?? DEFAULT_STEPS_CONTENT)
   }, [])
 
   const resetEditor = useCallback(() => {
@@ -534,8 +741,6 @@ interface ImportMeta {
     setTitle(DEFAULT_TITLE)
     setFeatureName(DEFAULT_FEATURE_NAME)
     setFeatureContent(DEFAULT_FEATURE_CONTENT)
-    setStepsName(DEFAULT_STEPS_NAME)
-    setStepsContent(DEFAULT_STEPS_CONTENT)
   }, [])
 
   const loadScenarios = useCallback(async () => {
@@ -662,34 +867,35 @@ interface ImportMeta {
     try {
       // In service context, run current feature against the Service Step Library via backend
       const url = serviceRunPath ? `${API_BASE_URL}${serviceRunPath}` : `${API_BASE_URL}/api/run`
-      const body = serviceRunPath
-        ? JSON.stringify({ features: scenarioPayload.features })
-        : JSON.stringify(runPayload)
+      const payload = serviceRunPath
+        ? { features: scenarioPayload.features, metadata: scenarioRunMetadata }
+        : runPayload
+      const body = JSON.stringify(payload)
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body,
       })
 
-      let payload: RunResponse | null = null
+      let parsedResponse: RunResponse | null = null
       try {
-        payload = (await response.json()) as RunResponse
+        parsedResponse = (await response.json()) as RunResponse
       } catch {
-        payload = null
+        parsedResponse = null
       }
 
       if (!response.ok) {
         const message =
-          payload?.error ||
+          parsedResponse?.error ||
           `Failed to execute the scenario. Server responded with status ${response.status}.`
         setError(message)
-        if (payload) {
-          setRunResult(payload)
+        if (parsedResponse) {
+          setRunResult(parsedResponse)
         }
         return
       }
 
-      setRunResult(payload ?? { stdout: 'Run completed.' })
+      setRunResult(parsedResponse ?? { stdout: 'Run completed.' })
       setFeedback('Scenario executed.')
     } catch (err) {
       const message =
@@ -697,8 +903,9 @@ interface ImportMeta {
       setError(message)
     } finally {
       setIsRunning(false)
+      void loadRunHistory()
     }
-  }, [runPayload, serviceRunPath, scenarioPayload.features])
+  }, [runPayload, serviceRunPath, scenarioPayload, scenarioRunMetadata, loadRunHistory])
 
   // Removed: redundant "Run Service (all steps)" button/handler. Use Run Scenario instead.
 
@@ -748,227 +955,285 @@ interface ImportMeta {
         </aside>
 
         <div className="flex flex-1 flex-col gap-6 min-w-0">
-        <header className="flex flex-col gap-2">
-          <h1 className="text-2xl font-semibold text-slate-900">Scenario Editor</h1>
-          <p className="text-sm text-slate-600">
-            Draft feature and step code, save versions to Spring, and execute against the QA runner.
-          </p>
-        </header>
-
-        <section className="grid gap-6 rounded border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-1 min-w-0">
-          <div className="flex flex-col gap-3 min-w-0">
-            <label className="flex flex-col gap-2">
-              <span className="text-sm font-medium text-slate-700">Scenario title</span>
-              <input
-                className="rounded border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                placeholder={DEFAULT_TITLE}
-              />
-            </label>
-
-            <label className="flex flex-col gap-2">
-              <span className="text-sm font-medium text-slate-700">Feature file</span>
-              <input
-                className="rounded border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-                value={featureName}
-                onChange={(event) => setFeatureName(event.target.value)}
-                placeholder={DEFAULT_FEATURE_NAME}
-              />
-            </label>
-            <div className="overflow-hidden rounded border border-slate-200 shadow-inner">
-              <Editor
-                height="400px"
-                path={featureEditorPath}
-                language="gherkin"
-                value={featureContent}
-                onChange={(value) => setFeatureContent(value ?? '')}
-                options={{
-                  minimap: { enabled: false },
-                  fontSize: 14,
-                  wordWrap: 'on',
-                  lineNumbers: 'on',
-                  scrollBeyondLastLine: false,
-                }}
-              />
-            </div>
-          </div>
-          <div className="flex items-center justify-center text-sm text-slate-500">
-            Steps are managed in the service Step Library.
-          </div>
-        </section>
-
-        <section className="flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={isBusy}
-            className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-400"
-          >
-            {isSaving ? 'Saving…' : selectedScenarioId === null ? 'Save Scenario' : 'Update Scenario'}
-          </button>
-          <button
-            type="button"
-            onClick={handleRun}
-            disabled={isBusy}
-            className="rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
-          >
-            {isRunning ? 'Running…' : 'Run Scenario'}
-          </button>
-          
-          {serviceRunPath && (
+          <header className="flex flex-col gap-2">
+            <h1 className="text-2xl font-semibold text-slate-900">Scenario Workspace</h1>
+            <p className="text-sm text-slate-600">
+              Draft feature files, save them to Spring, and execute runs against the QA runner.
+            </p>
+          </header>
+          <div className="flex gap-2">
             <button
               type="button"
-              onClick={async () => {
-                // Run all features under the service with the full Step Library
-                setIsRunningService(true)
-                setError(null)
-                setFeedback(null)
-                setRunResult(null)
-                try {
-                  const response = await fetch(`${API_BASE_URL}${serviceRunPath}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(null), // no features -> backend gathers all features
-                  })
-                  let payload: RunResponse | null = null
-                  try { payload = (await response.json()) as RunResponse } catch { payload = null }
-                  if (!response.ok) {
-                    setError(payload?.error || `Failed to execute the service run. Server responded with status ${response.status}.`)
-                    if (payload) setRunResult(payload)
-                    return
-                  }
-                  setRunResult(payload ?? { stdout: 'Service (all features) run completed.' })
-                  setFeedback('Service executed with all features.')
-                } catch (err) {
-                  const message = err instanceof Error ? err.message : 'Failed to execute service run.'
-                  setError(message)
-                } finally {
-                  setIsRunningService(false)
-                }
-              }}
-              disabled={isBusy}
-              className="rounded bg-indigo-700 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+              className={panelButtonClass('editor')}
+              onClick={() => setActivePanel('editor')}
             >
-              Run Service (all features)
+              Scenario editor
             </button>
-          )}
-          <button
-            type="button"
-            onClick={handleDelete}
-            className="rounded border border-red-400 px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50"
-          >
-            Delete Scenario
-          </button>
-        </section>
+            <button
+              type="button"
+              className={panelButtonClass('history')}
+              onClick={() => setActivePanel('history')}
+            >
+              Run history
+            </button>
+          </div>
 
-        {(feedback || error) && (
-          <section>
-            {feedback && <p className="text-sm text-emerald-600">{feedback}</p>}
-            {error && <p className="text-sm text-red-600">{error}</p>}
-          </section>
-        )}
+          {activePanel === 'editor' ? (
+            <>
+              <section className="grid min-w-0 gap-6 rounded border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-1">
+                <div className="flex min-w-0 flex-col gap-3">
+                  <label className="flex flex-col gap-2">
+                    <span className="text-sm font-medium text-slate-700">Scenario title</span>
+                    <input
+                      className="rounded border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                      value={title}
+                      onChange={(event) => setTitle(event.target.value)}
+                      placeholder={DEFAULT_TITLE}
+                    />
+                  </label>
 
-        {runResult && (
-          <section className="flex flex-col gap-3 rounded border border-slate-200 bg-white p-4 shadow-sm overflow-x-hidden">
-            <h2 className="text-lg font-semibold text-slate-800">Run output</h2>
-            {runResult.error && (
-              <div>
-                <h3 className="text-sm font-semibold text-red-600">Error</h3>
-                <pre className="mt-1 max-h-48 w-full overflow-auto rounded bg-rose-50 p-3 text-xs text-rose-700">
-                  {runResult.error}
-                </pre>
-              </div>
-            )}
-            {failureDetails.messages.length > 0 && (
-              <div>
-                <h3 className="text-sm font-semibold text-red-600">Failure details</h3>
-                <div className="mt-1 space-y-2">
-                  {failureDetails.messages.map((message, index) => (
-                    <pre
-                      key={`failure-message-${index}`}
-                      className="max-h-48 w-full overflow-auto rounded bg-amber-50 p-3 text-xs text-amber-800"
-                    >
-                      {message}
-                    </pre>
-                  ))}
+                  <label className="flex flex-col gap-2">
+                    <span className="text-sm font-medium text-slate-700">Feature file</span>
+                    <input
+                      className="rounded border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                      value={featureName}
+                      onChange={(event) => setFeatureName(event.target.value)}
+                      placeholder={DEFAULT_FEATURE_NAME}
+                    />
+                  </label>
+                  <div className="overflow-hidden rounded border border-slate-200 shadow-inner">
+                    <Editor
+                      height="400px"
+                      path={featureEditorPath}
+                      language="gherkin"
+                      value={featureContent}
+                      onChange={(value) => setFeatureContent(value ?? '')}
+                      options={{
+                        minimap: { enabled: false },
+                        fontSize: 14,
+                        wordWrap: 'on',
+                        lineNumbers: 'on',
+                        scrollBeyondLastLine: false,
+                      }}
+                    />
+                  </div>
                 </div>
-              </div>
-            )}
-            {runResult.stdout && (
-              <div>
-                <h3 className="text-sm font-semibold text-slate-700">STDOUT</h3>
-                <pre className="mt-1 max-h-48 w-full overflow-auto rounded bg-slate-900 p-3 text-xs text-slate-100">
-                  {runResult.stdout}
-                </pre>
-              </div>
-            )}
-            {runResult.stderr && (
-              <div>
-                <h3 className="text-sm font-semibold text-slate-700">STDERR</h3>
-                <pre className="mt-1 max-h-48 w-full overflow-auto rounded bg-slate-900 p-3 text-xs text-red-200">
-                  {runResult.stderr}
-                </pre>
-              </div>
-            )}
-            {imageAttachments.length > 0 && (
-              <div>
-                <h3 className="text-sm font-semibold text-slate-700">Captured screenshots</h3>
-                <div className="mt-2 flex flex-wrap gap-4">
-                  {imageAttachments.map((attachment) => {
-                    const dataUrl = `data:${attachment.mimeType};base64,${attachment.data}`
-                    return (
-                      <figure
-                        key={attachment.id}
-                        className="flex max-w-xs flex-col gap-1"
-                      >
-                        <img
-                          src={dataUrl}
-                          alt={attachment.stepName ?? 'Failure screenshot'}
-                          className="h-auto max-h-60 w-full cursor-zoom-in rounded border border-slate-200 bg-slate-100 object-contain transition hover:shadow-lg"
-                          onClick={() => setSelectedScreenshot(attachment)}
-                        />
-                        <figcaption className="text-xs text-slate-600">
-                          {attachment.scenarioName && (
-                            <span className="font-medium">{attachment.scenarioName}: </span>
-                          )}
-                          {attachment.stepName ?? 'Screenshot'}
-                        </figcaption>
-                      </figure>
-                    )
-                  })}
+                <div className="flex items-center justify-center text-sm text-slate-500">
+                  Steps are managed in the service Step Library.
                 </div>
-              </div>
-            )}
-            {textAttachments.length > 0 && (
-              <div>
-                <h3 className="text-sm font-semibold text-slate-700">Failure logs</h3>
-                <div className="mt-2 space-y-2">
-                  {textAttachments.map((attachment) => {
-                    let decoded = attachment.data
-                    try {
-                      decoded = atob(attachment.data)
-                    } catch {
-                      // ignore decoding errors
-                    }
-                    return (
-                      <div key={attachment.id} className="rounded border border-slate-200 bg-slate-50 p-3">
-                        <p className="text-xs font-medium text-slate-600">
-                          {attachment.scenarioName && `${attachment.scenarioName}: `}
-                          {attachment.stepName ?? 'After hook log'}
-                        </p>
-                        <pre className="mt-1 max-h-48 w-full overflow-auto whitespace-pre-wrap break-words text-xs text-slate-700">
-                          {decoded}
-                        </pre>
+              </section>
+
+              <section className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={isBusy}
+                  className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                >
+                  {isSaving ? 'Saving…' : selectedScenarioId === null ? 'Save Scenario' : 'Update Scenario'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRun}
+                  disabled={isBusy}
+                  className="rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                >
+                  {isRunning ? 'Running…' : 'Run Scenario'}
+                </button>
+
+                {serviceRunPath && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      // Run all features under the service with the full Step Library
+                      setIsRunningService(true)
+                      setError(null)
+                      setFeedback(null)
+                      setRunResult(null)
+                      try {
+                        const payload = {
+                          metadata: {
+                            scope: 'SERVICE' as RunScope,
+                            serviceId,
+                            serviceFullRun: true,
+                          },
+                        }
+                        const response = await fetch(`${API_BASE_URL}${serviceRunPath}`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(payload),
+                        })
+                        let serviceResponse: RunResponse | null = null
+                        try {
+                          serviceResponse = (await response.json()) as RunResponse
+                        } catch {
+                          serviceResponse = null
+                        }
+                        if (!response.ok) {
+                          setError(
+                            serviceResponse?.error ||
+                              `Failed to execute the service run. Server responded with status ${response.status}.`
+                          )
+                          if (serviceResponse) setRunResult(serviceResponse)
+                          return
+                        }
+                        setRunResult(serviceResponse ?? { stdout: 'Service (all features) run completed.' })
+                        setFeedback('Service executed with all features.')
+                      } catch (err) {
+                        const message = err instanceof Error ? err.message : 'Failed to execute service run.'
+                        setError(message)
+                      } finally {
+                        setIsRunningService(false)
+                        void loadRunHistory()
+                      }
+                    }}
+                    disabled={isBusy}
+                    className="rounded bg-indigo-700 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                  >
+                    Run Service (all features)
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  className="rounded border border-red-400 px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50"
+                >
+                  Delete Scenario
+                </button>
+              </section>
+
+              {(feedback || error) && (
+                <section>
+                  {feedback && <p className="text-sm text-emerald-600">{feedback}</p>}
+                  {error && <p className="text-sm text-red-600">{error}</p>}
+                </section>
+              )}
+
+              {runResult && (
+                <section className="flex flex-col gap-3 overflow-x-hidden rounded border border-slate-200 bg-white p-4 shadow-sm">
+                  <h2 className="text-lg font-semibold text-slate-800">Run output</h2>
+                  {runResult.error && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-red-600">Error</h3>
+                      <pre className="mt-1 max-h-48 w-full overflow-auto rounded bg-rose-50 p-3 text-xs text-rose-700">
+                        {runResult.error}
+                      </pre>
+                    </div>
+                  )}
+                  {failureDetails.messages.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-red-600">Failure details</h3>
+                      <div className="mt-1 space-y-2">
+                        {failureDetails.messages.map((message, index) => (
+                          <pre
+                            key={`failure-message-${index}`}
+                            className="max-h-48 w-full overflow-auto rounded bg-amber-50 p-3 text-xs text-amber-800"
+                          >
+                            {message}
+                          </pre>
+                        ))}
                       </div>
-                    )
-                  })}
-                </div>
+                    </div>
+                  )}
+                  {runResult.stdout && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-700">STDOUT</h3>
+                      <pre className="mt-1 max-h-48 w-full overflow-auto rounded bg-slate-900 p-3 text-xs text-slate-100">
+                        {runResult.stdout}
+                      </pre>
+                    </div>
+                  )}
+                  {runResult.stderr && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-700">STDERR</h3>
+                      <pre className="mt-1 max-h-48 w-full overflow-auto rounded bg-slate-900 p-3 text-xs text-red-200">
+                        {runResult.stderr}
+                      </pre>
+                    </div>
+                  )}
+                  {imageAttachments.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-700">Captured screenshots</h3>
+                      <div className="mt-2 flex flex-wrap gap-4">
+                        {imageAttachments.map((attachment) => {
+                          const dataUrl = `data:${attachment.mimeType};base64,${attachment.data}`
+                          return (
+                            <figure key={attachment.id} className="flex max-w-xs flex-col gap-1">
+                              <img
+                                src={dataUrl}
+                                alt={attachment.stepName ?? 'Failure screenshot'}
+                                className="h-auto max-h-60 w-full cursor-zoom-in rounded border border-slate-200 bg-slate-100 object-contain transition hover:shadow-lg"
+                                onClick={() => setSelectedScreenshot(attachment)}
+                              />
+                              <figcaption className="text-xs text-slate-600">
+                                {attachment.scenarioName && (
+                                  <span className="font-medium">{attachment.scenarioName}: </span>
+                                )}
+                                {attachment.stepName ?? 'Screenshot'}
+                              </figcaption>
+                            </figure>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {textAttachments.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-700">Failure logs</h3>
+                      <div className="mt-2 space-y-2">
+                        {textAttachments.map((attachment) => {
+                          let decoded = attachment.data
+                          try {
+                            decoded = atob(attachment.data)
+                          } catch {
+                            // ignore decoding errors
+                          }
+                          return (
+                            <div key={attachment.id} className="rounded border border-slate-200 bg-slate-50 p-3">
+                              <p className="text-xs font-medium text-slate-600">
+                                {attachment.scenarioName && `${attachment.scenarioName}: `}
+                                {attachment.stepName ?? 'After hook log'}
+                              </p>
+                              <pre className="mt-1 max-h-48 w-full overflow-auto whitespace-pre-wrap break-words text-xs text-slate-700">
+                                {decoded}
+                              </pre>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </section>
+              )}
+            </>
+          ) : (
+            <section className="flex flex-col gap-3 rounded border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-lg font-semibold text-slate-800">Run history</h2>
+                <button
+                  type="button"
+                  onClick={() => void loadRunHistory()}
+                  disabled={isRunHistoryLoading}
+                  className="rounded border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isRunHistoryLoading ? 'Refreshing…' : 'Refresh'}
+                </button>
               </div>
-            )}
-          </section>
-        )}
-      </div>
+              {runHistoryError && <p className="text-sm text-rose-600">{runHistoryError}</p>}
+              {isRunHistoryLoading && runHistory.length === 0 ? (
+                <p className="text-sm text-slate-500">Loading run history...</p>
+              ) : (
+                <div className="space-y-3">
+                  {serviceId !== undefined && <HistoryList title="Service runs" items={serviceHistory} />}
+                  <HistoryList
+                    title={serviceId !== undefined ? 'Scenario runs' : 'Recent scenario runs'}
+                    items={scenarioHistory}
+                  />
+                </div>
+              )}
+            </section>
+          )}
+        </div>
       </div>
       {selectedScreenshot && (
         <div

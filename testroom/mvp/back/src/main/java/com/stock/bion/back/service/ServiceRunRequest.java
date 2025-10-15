@@ -13,5 +13,6 @@ import lombok.NoArgsConstructor;
 @Builder
 public class ServiceRunRequest {
     private List<RunRequest.Asset> features;
+    private RunRequest.Metadata metadata;
 }
 
