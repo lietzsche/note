@@ -518,6 +518,8 @@ interface ImportMeta {
     [failureDetails.attachments]
   )
 
+  const isBusy = isSaving || isRunning || isRunningService
+
   const applyScenario = useCallback((scenario: ScenarioRecord) => {
     setSelectedScenarioId(scenario.id)
     setTitle(scenario.title ?? DEFAULT_TITLE)
@@ -800,7 +802,7 @@ interface ImportMeta {
           <button
             type="button"
             onClick={handleSave}
-            disabled={isSaving || isRunning}
+            disabled={isBusy}
             className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-400"
           >
             {isSaving ? 'Saving…' : selectedScenarioId === null ? 'Save Scenario' : 'Update Scenario'}
@@ -808,7 +810,7 @@ interface ImportMeta {
           <button
             type="button"
             onClick={handleRun}
-            disabled={isRunning || isSaving}
+            disabled={isBusy}
             className="rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
           >
             {isRunning ? 'Running…' : 'Run Scenario'}
@@ -845,7 +847,7 @@ interface ImportMeta {
                   setIsRunningService(false)
                 }
               }}
-              disabled={isRunningService || isSaving}
+              disabled={isBusy}
               className="rounded bg-indigo-700 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-800 disabled:cursor-not-allowed disabled:bg-slate-400"
             >
               Run Service (all features)
