@@ -95,6 +95,21 @@ function normalizeStatusLabel(status: string | undefined | null) {
   return status.toUpperCase()
 }
 
+function parseHistoryReport(report: string | null | undefined): CucumberReport | null {
+  if (!report) return null
+  try {
+    const parsed = JSON.parse(report)
+    return Array.isArray(parsed) ? (parsed as CucumberReport) : null
+  } catch {
+    return null
+  }
+}
+
+function extractHistoryDetails(report: string | null | undefined): FailureDetails {
+  const parsed = parseHistoryReport(report)
+  return extractFailureDetails(parsed)
+}
+
 type TypeDefinitionResponse = {
   files: Record<string, string>
 }
@@ -491,9 +506,11 @@ function ScenarioEditor({ basePath = '/api/scenarios' }: ScenarioEditorProps) {
   const HistoryList = ({
     title,
     items,
+    onSelectAttachment,
   }: {
     title: string
     items: RunHistoryEntry[]
+    onSelectAttachment: (attachment: FailureAttachment) => void
   }) => (
     <div className="rounded border border-slate-200 bg-slate-50 p-3 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -504,61 +521,141 @@ function ScenarioEditor({ basePath = '/api/scenarios' }: ScenarioEditorProps) {
         <p className="mt-2 text-xs text-slate-500">No runs recorded yet.</p>
       ) : (
         <ul className="mt-3 space-y-2">
-          {items.map((entry) => (
-            <li
-              key={entry.id ?? entry.runId}
-              className="rounded border border-slate-200 bg-white p-3"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold text-slate-800">
-                    {entry.scenarioTitle || entry.serviceName || entry.scope}
-                  </p>
-                  <p className="text-xs text-slate-500">{formatDateTime(entry.createdAt)}</p>
+          {items.map((entry) => {
+            const failureDetails = extractHistoryDetails(entry.report)
+            const imageAttachments = failureDetails.attachments.filter((attachment) =>
+              attachment.mimeType.toLowerCase().startsWith('image/')
+            )
+            const textAttachments = failureDetails.attachments.filter((attachment) =>
+              attachment.mimeType.toLowerCase().startsWith('text/')
+            )
+            const decodeAttachment = (value: string) => {
+              try {
+                return atob(value)
+              } catch {
+                return value
+              }
+            }
+            return (
+              <li
+                key={entry.id ?? entry.runId}
+                className="rounded border border-slate-200 bg-white p-3"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">
+                      {entry.scenarioTitle || entry.serviceName || entry.scope}
+                    </p>
+                    <p className="text-xs text-slate-500">{formatDateTime(entry.createdAt)}</p>
+                  </div>
+                  <span
+                    className={`rounded px-2 py-0.5 text-xs font-semibold ${resolveStatusClasses(entry.status)}`}
+                  >
+                    {normalizeStatusLabel(entry.status)}
+                  </span>
                 </div>
-                <span
-                  className={`rounded px-2 py-0.5 text-xs font-semibold ${resolveStatusClasses(entry.status)}`}
-                >
-                  {normalizeStatusLabel(entry.status)}
-                </span>
-              </div>
-              <div className="mt-2 grid gap-2 text-xs text-slate-600 sm:grid-cols-3">
-                <span>Duration: {formatDuration(entry.durationMs)}</span>
-                <span>HTTP: {entry.httpStatus ?? '-'}</span>
-                <span className="sm:text-right">
-                  Run ID:{' '}
-                  <span className="font-mono text-[11px] text-slate-700">{entry.runId}</span>
-                </span>
-              </div>
-              {entry.error && (
-                <p className="mt-2 text-xs text-rose-600">
-                  Error: <span className="font-mono text-[11px]">{entry.error}</span>
-                </p>
-              )}
-              {entry.stdout && (
-                <details className="mt-2 text-xs">
-                  <summary className="cursor-pointer text-slate-600">Show stdout</summary>
-                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded border border-slate-200 bg-slate-50 p-2 text-[11px] text-slate-800">
-                    {entry.stdout}
-                  </pre>
-                </details>
-              )}
-              {entry.stderr && (
-                <details className="mt-2 text-xs">
-                  <summary className="cursor-pointer text-slate-600">Show stderr</summary>
-                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded border border-slate-200 bg-slate-50 p-2 text-[11px] text-slate-800">
-                    {entry.stderr}
-                  </pre>
-                </details>
-              )}
-            </li>
-          ))}
+                <div className="mt-2 grid gap-2 text-xs text-slate-600 sm:grid-cols-3">
+                  <span>Duration: {formatDuration(entry.durationMs)}</span>
+                  <span>HTTP: {entry.httpStatus ?? '-'}</span>
+                  <span className="sm:text-right">
+                    Run ID:{' '}
+                    <span className="font-mono text-[11px] text-slate-700">{entry.runId}</span>
+                  </span>
+                </div>
+                {entry.error && (
+                  <p className="mt-2 text-xs text-rose-600">
+                    Error: <span className="font-mono text-[11px]">{entry.error}</span>
+                  </p>
+                )}
+                {entry.stdout && (
+                  <details className="mt-2 text-xs">
+                    <summary className="cursor-pointer text-slate-600">Show stdout</summary>
+                    <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded border border-slate-200 bg-slate-50 p-2 text-[11px] text-slate-800">
+                      {entry.stdout}
+                    </pre>
+                  </details>
+                )}
+                {entry.stderr && (
+                  <details className="mt-2 text-xs">
+                    <summary className="cursor-pointer text-slate-600">Show stderr</summary>
+                    <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded border border-slate-200 bg-slate-50 p-2 text-[11px] text-slate-800">
+                      {entry.stderr}
+                    </pre>
+                  </details>
+                )}
+                {failureDetails.messages.length > 0 && (
+                  <details className="mt-2 text-xs">
+                    <summary className="cursor-pointer text-slate-600">
+                      Failure messages ({failureDetails.messages.length})
+                    </summary>
+                    <div className="mt-1 space-y-1">
+                      {failureDetails.messages.map((message, index) => (
+                        <pre
+                          key={`history-failure-message-${entry.runId}-${index}`}
+                          className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800"
+                        >
+                          {message}
+                        </pre>
+                      ))}
+                    </div>
+                  </details>
+                )}
+                {imageAttachments.length > 0 && (
+                  <div className="mt-3">
+                    <p className="text-xs font-semibold text-slate-600">
+                      Screenshots ({imageAttachments.length})
+                    </p>
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      {imageAttachments.map((attachment) => {
+                        const dataUrl = `data:${attachment.mimeType};base64,${attachment.data}`
+                        return (
+                          <button
+                            key={attachment.id}
+                            type="button"
+                            className="group overflow-hidden rounded border border-slate-200 bg-slate-100"
+                            onClick={() => onSelectAttachment(attachment)}
+                          >
+                            <img
+                              src={dataUrl}
+                              alt={attachment.stepName ?? 'Screenshot'}
+                              className="h-20 w-28 object-cover transition group-hover:opacity-80"
+                            />
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+                {textAttachments.length > 0 && (
+                  <details className="mt-2 text-xs">
+                    <summary className="cursor-pointer text-slate-600">
+                      Failure logs ({textAttachments.length})
+                    </summary>
+                    <div className="mt-1 space-y-2">
+                      {textAttachments.map((attachment) => (
+                        <div
+                          key={attachment.id}
+                          className="rounded border border-slate-200 bg-slate-50 p-2"
+                        >
+                          <p className="text-[11px] font-medium text-slate-600">
+                            {attachment.scenarioName && `${attachment.scenarioName}: `}
+                            {attachment.stepName ?? 'Log'}
+                          </p>
+                          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] text-slate-700">
+                            {decodeAttachment(attachment.data)}
+                          </pre>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </li>
+            )
+          })}
         </ul>
       )}
     </div>
   )
-
-  
 
   const fetchJson = useCallback(
     async <T,>(path: string, init?: RequestInit): Promise<T> => {
@@ -1224,10 +1321,17 @@ interface ImportMeta {
                 <p className="text-sm text-slate-500">Loading run history...</p>
               ) : (
                 <div className="space-y-3">
-                  {serviceId !== undefined && <HistoryList title="Service runs" items={serviceHistory} />}
+                  {serviceId !== undefined && (
+                    <HistoryList
+                      title="Service runs"
+                      items={serviceHistory}
+                      onSelectAttachment={setSelectedScreenshot}
+                    />
+                  )}
                   <HistoryList
                     title={serviceId !== undefined ? 'Scenario runs' : 'Recent scenario runs'}
                     items={scenarioHistory}
+                    onSelectAttachment={setSelectedScreenshot}
                   />
                 </div>
               )}
