@@ -93,3 +93,35 @@
 ### 내일 해야 할 일
 - 메일링 시 프로젝트 명 로컬에서 돌리나 깃액션에서 돌리나 잘 들어가는지 확인 필요
 - choco 시간표 생성 시 이미 있을 경우에 한해서 수정 필요
+
+## 251015
+- 대표님께 testroom mvp 관련 공유
+```
+안녕하세요, 박영일 대표님.
+이채 책임입니다.
+
+다름이 아니오라 testroom 사이트 아키텍처 분석 관련해서 공유드립니다.
+
+임의로 소스를 만들어보는 게 좋을 거 같아, 소스 작성하면서 분석했습니다.
+1. 구성은 front(react.js), back(spring boot), runner(express.js)로 작성했는데요, 
+back의 경우는 추후 Cloudflare나 Supabase로 옮기면서 구성해야 할 거 같습니다.
+
+2. runner의 경우 
+express.js로 띄워서
+특정 url(/run)로 json으로 소스 스크립트(.step 파일)와 시나리오 스크립트(.feature 파일)을 spring boot로부터 받아서
+express.js 내부적으로 임시 폴더를 구성한 후 파일을 만들어서 빌드하여 cucumber와 playwright를 구동합니다.
+그렇게 돌아온 report 정보를 spring boot로 돌려주는 식으로 작성했습니다.
+
+3. front, back의 경우
+일단 서비스별 시나리오 CRUD와 소스(javascript, typescript) CRUD 및 RUNNER와 연동해서 RUN 후 보고서를 받고 해당 보고서의 history를 조회하는 것까지 작업한 상태입니다.
+
+4. 특이 사항
+소스나 시나리오 에디터의 경우 vscode의 엔진인 모나코Monaco를 사용했습니다.
+runner의 경우
+cloud로 옮긴다면 Cloudflare는 워커 실행당 cpu 등의 리소스 제한이 있고, Supabase는 브라우저를 지원하지 않는 것으로 보여
+fly.io나 Render등 별도의 서비스를 활용하는 것이 좋을 듯하여 공유드립니다.
+
+
+감사합니다.
+
+```
